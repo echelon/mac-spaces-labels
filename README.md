@@ -81,12 +81,18 @@ a shown or fading label holds it (it fades `linger_ms` after the pointer
 leaves); hovering a gone label does nothing. `rearm_ms` after you leave a
 desktop (once it has slid away) its label is reset, so it is already visible
 the next time that desktop slides in. An open "more" panel or rename form
-holds the label. Menu bar → **Show label briefly when switching** turns this
-off.
+holds the label, and so does holding **Control** (e.g. pausing between
+Ctrl+arrow switches; read from the session's modifier state, no permission
+needed), but only while the label is still up. Menu bar → **Show Label**
+brings the current desktop's label back; **Show label briefly when switching**
+turns the fading off.
+
+Overlays draw at window level 1500 (assistive-technology high): above every
+app window, other always-on-top tools, menus and screen savers.
 
 Menu bar → **Edit Settings…** opens `settings.json`; saving it applies changes
 live: `show_ms` (1100), `fade_ms` (700), `rearm_ms` (600), `linger_ms` (400),
-`panel_opacity` (0.85), `placement`, `project_names`, `auto_hide`,
+`panel_opacity` (0.85), `hold_with_ctrl` (true), `placement`, `project_names`, `auto_hide`,
 `show_apps`, `vision`.
 
 ## How it stays instant

@@ -52,6 +52,7 @@ extern "C" {
   pub fn CGDisplayBounds(display: u32) -> CgRect;
   pub fn CGPreflightScreenCaptureAccess() -> bool;
   pub fn CGEventCreate(source: *const c_void) -> *mut c_void;
+  pub fn CGEventSourceFlagsState(state: i32) -> u64;
   pub fn CGEventGetLocation(event: *const c_void) -> CgPoint;
   pub fn CGRequestScreenCaptureAccess() -> bool;
 }

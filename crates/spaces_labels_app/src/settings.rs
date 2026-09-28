@@ -30,6 +30,9 @@ pub struct Settings {
   pub linger_ms: u32,
   /// Opacity of the panel behind the text, 0–1.
   pub panel_opacity: f32,
+  /// Keep a shown (or fading) label up while Control is held, e.g. between
+  /// Ctrl+arrow desktop switches. A label that is already gone stays gone.
+  pub hold_with_ctrl: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +48,7 @@ impl Default for Settings {
       rearm_ms: 600,
       linger_ms: 400,
       panel_opacity: 0.85,
+      hold_with_ctrl: true,
     }
   }
 }

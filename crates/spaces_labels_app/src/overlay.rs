@@ -17,6 +17,8 @@ use tauri::{
 };
 
 const MARGIN: f64 = 12.0;
+/// See `configure_and_show`.
+const OVERLAY_LEVEL: isize = 1500;
 
 /// A rectangle in global points (top-left origin), or relative to a window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize)]
@@ -226,7 +228,10 @@ unsafe fn configure_and_show(
   // Mission Control. IgnoresCycle: never in Cmd-`. FullScreenNone: cannot
   // become a full-screen Space of its own.
   native.setCollectionBehavior(B::Managed | B::Stationary | B::IgnoresCycle | B::FullScreenNone);
-  native.setLevel(25); // NSStatusWindowLevel: above every normal and floating window.
+  // kCGAssistiveTechHighWindowLevel: above every app window, status-level
+  // panels (e.g. other always-on-top tools at level 25), menus (101) and
+  // screen savers (1000); only the cursor and drag images draw higher.
+  native.setLevel(OVERLAY_LEVEL);
   native.setIgnoresMouseEvents(true);
   native.setHasShadow(false);
   let number = native.windowNumber() as u32;

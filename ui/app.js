@@ -37,6 +37,7 @@ let editing = false;
 let phase = "shown";
 let showing = false;
 let pointerInside = false;
+let ctrlHeld = false;
 let fadeTimer = 0;
 let rearmTimer = 0;
 const DEFAULT_TIMING = { show_ms: 1100, fade_ms: 700, rearm_ms: 600, linger_ms: 400, panel_opacity: 0.85 };
@@ -60,7 +61,7 @@ function scheduleFade(delay) {
   clearTimeout(fadeTimer);
   if (!autoHide()) return;
   fadeTimer = setTimeout(() => {
-    if (pointerInside || !autoHide()) return;
+    if (pointerInside || ctrlHeld || !autoHide()) return;
     setPhase("fading", timing().fade_ms);
     fadeTimer = setTimeout(() => setPhase("hidden", 0), timing().fade_ms);
   }, delay);
@@ -90,13 +91,33 @@ function setShowing(next) {
   }
 }
 
+// Control held (see Rust `update_hover`): hold a label that is still up;
+// release fades it like the pointer leaving. A gone label ignores it.
+function setHold(held) {
+  ctrlHeld = held;
+  if (phase === "hidden" || !showing) return;
+  if (held) {
+    clearTimeout(fadeTimer);
+    if (phase === "fading") setPhase("shown", 150);
+  } else if (!pointerInside) {
+    scheduleFade(timing().linger_ms);
+  }
+}
+
+// Menu bar → Show Label: back to full opacity, then fade as on arrival.
+function reveal() {
+  if (!showing) return;
+  rearm();
+  scheduleFade(timing().show_ms);
+}
+
 function setPointer(inside) {
   pointerInside = inside;
   if (phase === "hidden" || !showing) return;
   if (inside) {
     clearTimeout(fadeTimer);
     setPhase("shown", 150);
-  } else {
+  } else if (!ctrlHeld) {
     scheduleFade(timing().linger_ms);
   }
 }
@@ -375,4 +396,6 @@ currentWindow.listen("overlay-state", (event) => onState(event.payload));
 // Pushed by the poll the moment the desktop switches (ahead of the state).
 currentWindow.listen("space-active", (event) => setShowing(event.payload));
 currentWindow.listen("pointer", (event) => setPointer(event.payload));
+currentWindow.listen("hold", (event) => setHold(event.payload));
+currentWindow.listen("reveal", reveal);
 invoke("overlay_state").then(onState);

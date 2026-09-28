@@ -110,3 +110,11 @@ pub fn mouse_location() -> (f64, f64) {
     (point.x, point.y)
   }
 }
+
+/// Whether a Control key is held right now. Reads the combined session's
+/// modifier state: no Accessibility or Input Monitoring permission needed.
+pub fn control_key_down() -> bool {
+  const COMBINED_SESSION_STATE: i32 = 0;
+  const FLAG_MASK_CONTROL: u64 = 1 << 18;
+  unsafe { ffi::CGEventSourceFlagsState(COMBINED_SESSION_STATE) & FLAG_MASK_CONTROL != 0 }
+}

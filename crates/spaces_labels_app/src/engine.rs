@@ -95,6 +95,8 @@ pub struct Model {
   pub showing: Vec<SpaceId>,
   /// When `settings.json` was last written, to notice outside edits.
   pub settings_modified: Option<std::time::SystemTime>,
+  /// Control is held (and holding with it is enabled).
+  pub ctrl_held: bool,
 }
 
 impl Model {
@@ -249,6 +251,23 @@ impl Engine {
     self.send(Msg::Refresh);
   }
 
+  /// Shows the current desktops' labels again (menu bar → Show Label); they
+  /// then fade as on arrival.
+  pub fn reveal(&self, app: &AppHandle) {
+    let labels: Vec<String> = {
+      let model = self.model.lock().unwrap();
+      model
+        .overlays
+        .iter()
+        .filter(|(space, _)| model.showing.contains(space))
+        .map(|(_, o)| o.label.clone())
+        .collect()
+    };
+    for label in labels {
+      let _ = app.emit_to(label.as_str(), "reveal", ());
+    }
+  }
+
   pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>, panel: Option<Frame>) {
     if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
       o.hit = hit;
@@ -349,8 +368,13 @@ fn poll_loop(app: AppHandle) {
           .map(|(_, space)| model.title_for(space));
         (title, changes)
       };
+      let ctrl_held = engine.model.lock().unwrap().ctrl_held;
       for (label, is_showing) in changes {
         let _ = app.emit_to(label.as_str(), "space-active", is_showing);
+        // Arriving with Ctrl still down (a Ctrl+arrow switch) holds the label.
+        if is_showing && ctrl_held {
+          let _ = app.emit_to(label.as_str(), "hold", true);
+        }
       }
       // Unknown Space (just created): the worker's snapshot will name it.
       if let (Some(title), Some(tray)) = (title, app.tray_by_id(TRAY_ID)) {
@@ -371,6 +395,23 @@ fn update_hover(app: &AppHandle, engine: &Engine) {
   let (x, y) = spaces_sys::mouse_location();
   let mut model = engine.model.lock().unwrap();
   let showing = model.showing.clone();
+  // Control held: tell the showing labels to hold (they ignore it once gone).
+  let ctrl = model.settings.hold_with_ctrl && spaces_sys::control_key_down();
+  if ctrl != model.ctrl_held {
+    model.ctrl_held = ctrl;
+    let labels: Vec<String> = model
+      .overlays
+      .iter()
+      .filter(|(space, _)| showing.contains(space))
+      .map(|(_, o)| o.label.clone())
+      .collect();
+    let app = app.clone();
+    std::thread::spawn(move || {
+      for label in labels {
+        let _ = app.emit_to(label.as_str(), "hold", ctrl);
+      }
+    });
+  }
   // Tell a showing label when the pointer enters or leaves it (it holds
   // while hovered and fades once the pointer leaves).
   let mut pointer_events = Vec::new();

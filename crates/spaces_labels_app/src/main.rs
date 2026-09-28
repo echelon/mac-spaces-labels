@@ -116,6 +116,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     settings.vision,
     None::<&str>,
   )?;
+  let reveal = MenuItem::with_id(app, "reveal", "Show Label", true, None::<&str>)?;
   let edit_settings =
     MenuItem::with_id(app, "edit_settings", "Edit Settings…", true, Some("Cmd+,"))?;
   let quit = MenuItem::with_id(app, "quit", "Quit Spaces Labels", true, Some("Cmd+Q"))?;
@@ -129,7 +130,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
   )?;
   let separator = PredefinedMenuItem::separator(app)?;
   let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> =
-    vec![&position, &auto_hide, &show_apps, &describe];
+    vec![&reveal, &position, &auto_hide, &show_apps, &describe];
   if titles_missing {
     items.push(&allow_titles);
   }
@@ -151,6 +152,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
       let engine = app.state::<Engine>();
       match event.id().as_ref() {
         "quit" => app.exit(0),
+        "reveal" => engine.reveal(app),
         // Opens settings.json in the default text editor; saving it applies
         // the changes live (the worker watches the file).
         "edit_settings" => {
