@@ -38,6 +38,9 @@ pub const TRAY_ID: &str = "main";
 /// How often the poll loop hit-tests the pointer against clickable overlay
 /// regions, in poll ticks (8 x 2 ms: about 60 Hz).
 const HOVER_EVERY: u32 = 8;
+/// How often the pointer/Ctrl state is re-sent even when unchanged, in poll
+/// ticks (256 x 2 ms: about every half second). A multiple of HOVER_EVERY.
+const RESEND_EVERY: u32 = 256;
 
 /// The most recently activated app other than us, to hand focus back to
 /// after a click on an overlay activates this app.
@@ -58,13 +61,15 @@ pub struct Overlay {
   pub sent: Option<OverlayState>,
   /// Where the window is, in global points.
   pub frame: Frame,
-  /// The clickable region ("more" link or expanded panel), window-relative,
-  /// as reported by the page.
-  pub hit: Option<Frame>,
+  /// The clickable regions (the "more" link, title and desktop line, or the
+  /// whole expanded panel), window-relative, as reported by the page.
+  pub hit: Vec<Frame>,
   /// The whole label panel, window-relative: hovering it holds the label.
   pub panel: Option<Frame>,
   /// Whether the pointer was over `panel` at the last hover check.
   pub pointer_inside: bool,
+  /// Consecutive rescans that found the window off its Space.
+  pub misplaced: u8,
   pub expanded: bool,
 }
 
@@ -268,7 +273,7 @@ impl Engine {
     }
   }
 
-  pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>, panel: Option<Frame>) {
+  pub fn set_hit_rect(&self, label: &str, hit: Vec<Frame>, panel: Option<Frame>) {
     if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
       o.hit = hit;
       o.panel = panel;
@@ -340,7 +345,7 @@ fn poll_loop(app: AppHandle) {
   loop {
     tick = tick.wrapping_add(1);
     if tick.is_multiple_of(HOVER_EVERY) {
-      update_hover(&app, &engine);
+      update_hover(&app, &engine, tick.is_multiple_of(RESEND_EVERY));
     }
     let active = engine.spaces.active_space();
     if active != last {
@@ -391,67 +396,58 @@ fn poll_loop(app: AppHandle) {
 
 /// Makes the overlay under the pointer clickable when the pointer is over
 /// its clickable region, and every other overlay click-through again.
-fn update_hover(app: &AppHandle, engine: &Engine) {
+fn update_hover(app: &AppHandle, engine: &Engine, resend: bool) {
   let (x, y) = spaces_sys::mouse_location();
   let mut model = engine.model.lock().unwrap();
   let showing = model.showing.clone();
-  // Control held: tell the showing labels to hold (they ignore it once gone).
+  // Events for the showing labels, sent in order from this thread (never
+  // from spawned threads, which can reorder "entered" and "left" and leave a
+  // label held forever). `resend` repeats the current state (every
+  // RESEND_EVERY) so a label can never stay stuck on a lost event.
+  let mut events: Vec<(String, &'static str, bool)> = Vec::new();
+  // Control held: showing labels hold (they ignore it once gone).
   let ctrl = model.settings.hold_with_ctrl && spaces_sys::control_key_down();
-  if ctrl != model.ctrl_held {
-    model.ctrl_held = ctrl;
-    let labels: Vec<String> = model
-      .overlays
-      .iter()
-      .filter(|(space, _)| showing.contains(space))
-      .map(|(_, o)| o.label.clone())
-      .collect();
-    let app = app.clone();
-    std::thread::spawn(move || {
-      for label in labels {
-        let _ = app.emit_to(label.as_str(), "hold", ctrl);
-      }
-    });
-  }
-  // Tell a showing label when the pointer enters or leaves it (it holds
-  // while hovered and fades once the pointer leaves).
-  let mut pointer_events = Vec::new();
+  let ctrl_changed = ctrl != model.ctrl_held;
+  model.ctrl_held = ctrl;
+  // The pointer over a label's panel holds it too.
   for (space, overlay) in model.overlays.iter_mut() {
-    let inside = showing.contains(space)
+    let on_screen = showing.contains(space);
+    let inside = on_screen
       && overlay
         .panel
         .is_some_and(|panel| panel.offset(overlay.frame).contains(x, y));
-    if inside != overlay.pointer_inside {
+    if inside != overlay.pointer_inside || (resend && on_screen) {
       overlay.pointer_inside = inside;
-      pointer_events.push((overlay.label.clone(), inside));
+      events.push((overlay.label.clone(), "pointer", inside));
+    }
+    if on_screen && (ctrl_changed || resend) {
+      events.push((overlay.label.clone(), "hold", ctrl));
     }
   }
-  if !pointer_events.is_empty() {
-    let app = app.clone();
-    // Emitting evaluates script in the webview; keep it off the lock.
-    std::thread::spawn(move || {
-      for (label, inside) in pointer_events {
-        let _ = app.emit_to(label.as_str(), "pointer", inside);
-      }
-    });
-  }
+  // Clickable regions: the "more" link, the title and the desktop line.
   let target = model
     .overlays
     .iter()
     .filter(|(space, _)| showing.contains(space))
     .find_map(|(_, o)| {
-      let hit = o.hit?.offset(o.frame);
-      hit.contains(x, y).then(|| o.label.clone())
+      o.hit
+        .iter()
+        .any(|r| r.offset(o.frame).contains(x, y))
+        .then(|| o.label.clone())
     });
-  if target == model.interactive {
-    return;
-  }
-  let previous = std::mem::replace(&mut model.interactive, target.clone());
+  let previous = (target != model.interactive)
+    .then(|| std::mem::replace(&mut model.interactive, target.clone()));
   drop(model);
-  if let Some(label) = previous {
-    overlay::set_click_through(app, &label, true);
+  for (label, event, value) in events {
+    let _ = app.emit_to(label.as_str(), event, value);
   }
-  if let Some(label) = target {
-    overlay::set_click_through(app, &label, false);
+  if let Some(previous) = previous {
+    if let Some(label) = previous {
+      overlay::set_click_through(app, &label, true);
+    }
+    if let Some(label) = target {
+      overlay::set_click_through(app, &label, false);
+    }
   }
 }
 
@@ -510,15 +506,21 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   // Drop overlays whose Space is gone, or whose window is not (only) on its
   // Space: a switch raced its creation, or the window was closed.
   let mut to_close = Vec::new();
+  // A gone Space closes its overlay at once; a window reported off its
+  // Space must be seen so twice in a row (~750 ms apart), because
+  // WindowServer can briefly misreport during switches and Mission Control,
+  // and a needless close leaves that desktop without a label for a moment.
   model.overlays.retain(|space, overlay| {
-    let valid = snapshot
+    let space_ok = snapshot
       .space(*space)
-      .is_some_and(|(d, s)| s.kind == SpaceKind::Desktop && d.uuid == overlay.display)
-      && spaces.spaces_for_window(overlay.window_number) == [*space];
-    if !valid {
+      .is_some_and(|(d, s)| s.kind == SpaceKind::Desktop && d.uuid == overlay.display);
+    let placed = spaces.spaces_for_window(overlay.window_number) == [*space];
+    overlay.misplaced = if placed { 0 } else { overlay.misplaced + 1 };
+    let keep = space_ok && overlay.misplaced < 2;
+    if !keep {
       to_close.push(overlay.label.clone());
     }
-    valid
+    keep
   });
 
   let mut to_create = Vec::new();
@@ -594,9 +596,10 @@ fn reconcile(app: &AppHandle, relayout: bool) {
             display,
             sent: None,
             frame: created.frame,
-            hit: None,
+            hit: Vec::new(),
             panel: None,
             pointer_inside: false,
+            misplaced: 0,
             expanded: false,
           },
         );

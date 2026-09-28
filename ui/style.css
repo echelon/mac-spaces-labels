@@ -121,6 +121,7 @@ h1 {
   overflow: hidden;
 }
 /* Last resort for very long names: wrap, never cut off. */
+h1, .eyebrow { cursor: pointer; }
 h1.wrap { white-space: normal; text-wrap: balance; overflow: visible; }
 
 .subtitle {

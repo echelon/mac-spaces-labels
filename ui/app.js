@@ -39,6 +39,7 @@ let showing = false;
 let pointerInside = false;
 let ctrlHeld = false;
 let fadeTimer = 0;
+let fadePending = false;
 let rearmTimer = 0;
 const DEFAULT_TIMING = { show_ms: 1100, fade_ms: 700, rearm_ms: 600, linger_ms: 400, panel_opacity: 0.85 };
 const timing = () => (state && state.timing) || DEFAULT_TIMING;
@@ -54,17 +55,49 @@ function setPhase(next, durationMs) {
 function clearTimers() {
   clearTimeout(fadeTimer);
   clearTimeout(rearmTimer);
+  fadePending = false;
 }
 
 // Fade after `delay` unless something holds the label by then.
 function scheduleFade(delay) {
   clearTimeout(fadeTimer);
+  fadePending = false;
   if (!autoHide()) return;
+  fadePending = true;
   fadeTimer = setTimeout(() => {
-    if (pointerInside || ctrlHeld || !autoHide()) return;
+    if (pointerInside || ctrlHeld || !autoHide()) {
+      fadePending = false;
+      return;
+    }
     setPhase("fading", timing().fade_ms);
-    fadeTimer = setTimeout(() => setPhase("hidden", 0), timing().fade_ms);
+    fadeTimer = setTimeout(() => {
+      fadePending = false;
+      setPhase("hidden", 0);
+    }, timing().fade_ms);
   }, delay);
+}
+
+// Failsafe: a label that is up, on screen and held by nothing always gets a
+// fade scheduled, whatever event might have been lost.
+setInterval(() => {
+  if (showing && autoHide() && phase === "shown" && !pointerInside && !ctrlHeld && !fadePending) {
+    scheduleFade(timing().linger_ms);
+  }
+}, 500);
+
+// Clicking the title or the desktop line dismisses the label at once (the
+// app chips stay click-through), and hands focus back to the previous app.
+function dismiss() {
+  if (phase === "hidden") return;
+  if (editing) closeRename();
+  if (expanded) {
+    expanded = false;
+    render();
+    invoke("set_expanded", { expanded: false });
+  }
+  clearTimers();
+  setPhase("hidden", 120);
+  invoke("dismissed");
 }
 
 function rearm() {
@@ -94,6 +127,8 @@ function setShowing(next) {
 // Control held (see Rust `update_hover`): hold a label that is still up;
 // release fades it like the pointer leaving. A gone label ignores it.
 function setHold(held) {
+  // Rust re-sends the state twice a second; act only on changes.
+  if (held === ctrlHeld) return;
   ctrlHeld = held;
   if (phase === "hidden" || !showing) return;
   if (held) {
@@ -112,6 +147,7 @@ function reveal() {
 }
 
 function setPointer(inside) {
+  if (inside === pointerInside) return;
   pointerInside = inside;
   if (phase === "hidden" || !showing) return;
   if (inside) {
@@ -324,14 +360,16 @@ function reportHitRect() {
       ? { x: r.left - pad, y: r.top - pad, width: r.width + 2 * pad, height: r.height + 2 * pad }
       : null;
   };
-  // A hidden label neither takes clicks nor reacts to hovering.
+  // A hidden label neither takes clicks nor reacts to hovering. A shown one
+  // takes clicks only on the "more" link, the title and the desktop line.
   const hidden = phase === "hidden";
-  const rect = hidden ? null : expanded ? box(label, 0) : box(moreEl, 6);
+  const targets = hidden ? [] : expanded ? [box(label, 0)] : [box(moreEl, 6), box(nameEl, 0), box(eyebrowEl, 4)];
+  const rects = targets.filter(Boolean);
   const panel = hidden ? null : box(label, 0);
-  const key = JSON.stringify([rect, panel]);
+  const key = JSON.stringify([rects, panel]);
   if (key === lastHit) return;
   lastHit = key;
-  invoke("set_hit_rect", { rect, panel });
+  invoke("set_hit_rect", { rects, panel });
 }
 
 function openRename() {
@@ -358,6 +396,8 @@ function saveRename(name) {
 }
 
 renameOpen.addEventListener("click", openRename);
+nameEl.addEventListener("click", dismiss);
+eyebrowEl.addEventListener("click", dismiss);
 $("rename-cancel").addEventListener("click", closeRename);
 $("rename-reset").addEventListener("click", () => saveRename(""));
 renameForm.addEventListener("submit", (event) => {
@@ -385,10 +425,14 @@ new ResizeObserver(() => {
 }).observe(document.body);
 function onState(next) {
   if (!next) return;
+  const first = !state;
   const hadAutoHide = state && state.auto_hide;
   render(next);
   if (hadAutoHide && !next.auto_hide) rearm();
-  setShowing(next.showing);
+  // Only the first state says whether we are on screen: later pushes are
+  // computed a moment earlier and can arrive after a newer "space-active",
+  // which is the authority for switches.
+  if (first) setShowing(next.showing);
   if (!hadAutoHide && next.auto_hide && showing && phase === "shown") scheduleFade(timing().show_ms);
 }
 

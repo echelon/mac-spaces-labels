@@ -30,16 +30,22 @@ fn set_expanded(window: WebviewWindow, engine: State<Engine>, expanded: bool) {
   engine.set_expanded(window.app_handle(), window.label(), expanded);
 }
 
-/// The page reports its clickable region and its whole panel
-/// (window-relative points), or `None` while hidden.
+/// The page reports its clickable regions and its whole panel
+/// (window-relative points); none while the label is hidden.
 #[tauri::command]
 fn set_hit_rect(
   window: WebviewWindow,
   engine: State<Engine>,
-  rect: Option<overlay::Frame>,
+  rects: Vec<overlay::Frame>,
   panel: Option<overlay::Frame>,
 ) {
-  engine.set_hit_rect(window.label(), rect, panel);
+  engine.set_hit_rect(window.label(), rects, panel);
+}
+
+/// A click on the label dismissed it: give focus back to the previous app.
+#[tauri::command]
+fn dismissed(window: WebviewWindow) {
+  engine::restore_focus(window.app_handle());
 }
 
 #[tauri::command]
@@ -190,7 +196,8 @@ fn main() {
       set_expanded,
       set_hit_rect,
       rename_space,
-      set_editing
+      set_editing,
+      dismissed
     ])
     .setup(|app| {
       #[cfg(target_os = "macos")]
