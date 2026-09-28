@@ -18,9 +18,33 @@ use tauri::{
 
 const MARGIN: f64 = 12.0;
 
+/// A rectangle in global points (top-left origin), or relative to a window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct Frame {
+  pub x: f64,
+  pub y: f64,
+  pub width: f64,
+  pub height: f64,
+}
+
+impl Frame {
+  pub fn offset(self, by: Frame) -> Frame {
+    Frame {
+      x: self.x + by.x,
+      y: self.y + by.y,
+      ..self
+    }
+  }
+
+  pub fn contains(self, x: f64, y: f64) -> bool {
+    x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+  }
+}
+
 pub struct Created {
   pub label: String,
   pub window_number: u32,
+  pub frame: Frame,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -38,11 +62,13 @@ pub fn create(
   // Labels are never reused so a closing window cannot collide with its
   // replacement.
   let label = format!("space-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
-  let (position, (width, height)) = frame_for(app, display, placement)?;
+  let frame = frame_for(app, display, placement, false)?;
   let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
     .title("Spaces Labels")
-    .inner_size(width, height)
-    .position(position.x, position.y)
+    .inner_size(frame.width, frame.height)
+    .position(frame.x, frame.y)
+    // The "more" link must work on the first click, without a focusing click.
+    .accept_first_mouse(true)
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -63,6 +89,7 @@ pub fn create(
     Some(window_number) => Some(Created {
       label,
       window_number,
+      frame,
     }),
     None => {
       let _ = window.destroy();
@@ -71,14 +98,33 @@ pub fn create(
   }
 }
 
-pub fn reposition(app: &AppHandle, label: &str, display: &str, placement: Placement) {
-  if let (Some(window), Some((position, (width, height)))) = (
-    app.get_webview_window(label),
-    frame_for(app, display, placement),
-  ) {
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(position);
-  }
+/// Moves and resizes an overlay; returns its new frame.
+pub fn reposition(
+  app: &AppHandle,
+  label: &str,
+  display: &str,
+  placement: Placement,
+  expanded: bool,
+) -> Option<Frame> {
+  let window = app.get_webview_window(label)?;
+  let frame = frame_for(app, display, placement, expanded)?;
+  let _ = window.set_size(LogicalSize::new(frame.width, frame.height));
+  let _ = window.set_position(LogicalPosition::new(frame.x, frame.y));
+  Some(frame)
+}
+
+/// Overlays ignore the mouse (clicks fall through to the apps beneath)
+/// except while the pointer is over the "more" link or the expanded panel.
+pub fn set_click_through(app: &AppHandle, label: &str, click_through: bool) {
+  let Some(window) = app.get_webview_window(label) else {
+    return;
+  };
+  let _ = app.run_on_main_thread(move || unsafe {
+    if let Ok(raw) = window.ns_window() {
+      let native = &*(raw as *mut objc2_app_kit::NSWindow);
+      native.setIgnoresMouseEvents(click_through);
+    }
+  });
 }
 
 pub fn close(app: &AppHandle, label: &str) {
@@ -87,13 +133,15 @@ pub fn close(app: &AppHandle, label: &str) {
   }
 }
 
-/// The overlay's top-left corner and size inside the display's usable area
-/// (below the menu bar, beside the Dock).
+/// The overlay's frame inside the display's usable area (below the menu bar,
+/// beside the Dock). Expanded overlays are tall enough to list tabs, anchored
+/// the same way as collapsed ones.
 fn frame_for(
   app: &AppHandle,
   display: &str,
   placement: Placement,
-) -> Option<(LogicalPosition<f64>, (f64, f64))> {
+  expanded: bool,
+) -> Option<Frame> {
   let bounds = spaces_sys::display_bounds(display)?;
   let monitors = app.available_monitors().unwrap_or_default();
   let monitor = monitors.iter().find(|m| {
@@ -116,6 +164,11 @@ fn frame_for(
   };
   // Never larger than the usable area (small or scaled displays).
   let (w, h) = placement.window_size();
+  let (w, h) = if expanded {
+    (w.max(680.0), h.max(height * 0.8))
+  } else {
+    (w, h)
+  };
   let (w, h) = (w.min(width - 2.0 * MARGIN), h.min(height - 2.0 * MARGIN));
   let left = x + MARGIN;
   let right = x + width - w - MARGIN;
@@ -123,17 +176,20 @@ fn frame_for(
   let bottom = y + height - h - MARGIN;
   let center_x = x + (width - w) / 2.0;
   let center_y = y + (height - h) / 2.0;
-  let position = match placement {
-    Placement::TopLeft => LogicalPosition::new(left, top),
-    Placement::TopRight => LogicalPosition::new(right, top),
-    Placement::BottomLeft => LogicalPosition::new(left, bottom),
-    Placement::BottomRight => LogicalPosition::new(right, bottom),
-    Placement::Center | Placement::CenterBig => LogicalPosition::new(center_x, center_y),
-    Placement::Hero | Placement::HeroBig => {
-      LogicalPosition::new(center_x, (y + height / 4.0 - h / 2.0).max(top))
-    }
+  let (x, y) = match placement {
+    Placement::TopLeft => (left, top),
+    Placement::TopRight => (right, top),
+    Placement::BottomLeft => (left, bottom),
+    Placement::BottomRight => (right, bottom),
+    Placement::Center | Placement::CenterBig => (center_x, center_y),
+    Placement::Hero | Placement::HeroBig => (center_x, (y + height / 4.0 - h / 2.0).max(top)),
   };
-  Some((position, (w, h)))
+  Some(Frame {
+    x,
+    y,
+    width: w,
+    height: h,
+  })
 }
 
 /// WebKit stops rendering webviews in occluded windows. Our overlays spend

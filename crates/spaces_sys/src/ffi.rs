@@ -36,7 +36,7 @@ pub const WINDOW_LIST_ALL: u32 = 0;
 pub const WINDOW_LIST_EXCLUDE_DESKTOP: u32 = 1 << 4;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
 pub struct CgRect {
   pub x: f64,
   pub y: f64,
@@ -50,6 +50,17 @@ extern "C" {
   pub fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> CgError;
   pub fn CGMainDisplayID() -> u32;
   pub fn CGDisplayBounds(display: u32) -> CgRect;
+  pub fn CGPreflightScreenCaptureAccess() -> bool;
+  pub fn CGEventCreate(source: *const c_void) -> *mut c_void;
+  pub fn CGEventGetLocation(event: *const c_void) -> CgPoint;
+  pub fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CgPoint {
+  pub x: f64,
+  pub y: f64,
 }
 
 #[link(name = "ColorSync", kind = "framework")]

@@ -102,8 +102,8 @@ body.top_right .apps li::after, body.bottom_right .apps li::after {
   vertical-align: 2px;
 }
 
-.apps .more { opacity: 0.75; font-weight: 500; }
-.apps .more::before, .apps .more::after { visibility: hidden; }
+.apps .more-apps { opacity: 0.75; font-weight: 500; }
+.apps .more-apps::before, .apps .more-apps::after { visibility: hidden; }
 .apps[hidden] { display: none; }
 
 /* Centered placements: the window itself is centered on screen, so center
@@ -131,3 +131,104 @@ body.center_big .label, body.hero_big .label { padding: 24px 48px 28px; border-r
 body.center_big h1, body.hero_big h1 { font-size: 128px; letter-spacing: -0.03em; }
 body.center_big .apps, body.hero_big .apps { font-size: 26px; column-gap: 28px; }
 body.center_big .apps li::before, body.hero_big .apps li::before { width: 10px; height: 10px; margin-right: 10px; vertical-align: 4px; }
+
+/* "more" link: the only clickable part of a collapsed label. */
+.more {
+  align-self: inherit;
+  margin: 2px 0 0;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+.more:hover { color: var(--text); background: rgba(255, 255, 255, 0.14); }
+body.center_big .more, body.hero_big .more { font-size: 18px; }
+
+/* Expanded: an opaque, scrollable panel filling the (resized) window. Lists
+   read best left-aligned, whatever the placement. */
+body.expanded .label {
+  width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  background: rgba(12, 14, 26, 0.9);
+  text-align: left;
+  align-items: stretch;
+}
+body.expanded h1 { font-size: 34px; }
+body.expanded .more { align-self: flex-start; }
+
+.details {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+.details[hidden] { display: none; }
+
+.details .hint { margin: 4px 0 10px; color: var(--muted); font-style: italic; }
+
+.details .app { margin: 12px 0 4px; }
+.details h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.details .window-title {
+  margin: 6px 0 2px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.details ul { list-style: none; margin: 0; padding: 0; }
+.details .children { margin: 1px 0 3px 14px; padding-left: 8px; border-left: 2px solid rgba(255, 255, 255, 0.12); }
+.details .entry .line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+  min-width: 0;
+}
+.details .entry .title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.82);
+}
+.details .entry .detail {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.details .entry.active > .line .title { color: #fff; font-weight: 700; }
+.details .entry.active > .line .title::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+.details .overflow { color: var(--muted); font-style: italic; }

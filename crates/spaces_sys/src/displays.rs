@@ -22,6 +22,21 @@ pub fn display_bounds(uuid: &str) -> Option<CgRect> {
   }
 }
 
+/// Global bounds of every active display.
+pub fn display_rects() -> Vec<CgRect> {
+  let mut ids = [0u32; 32];
+  let mut count = 0u32;
+  unsafe {
+    if ffi::CGGetActiveDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) != 0 {
+      return Vec::new();
+    }
+    ids[..count as usize]
+      .iter()
+      .map(|&id| ffi::CGDisplayBounds(id))
+      .collect()
+  }
+}
+
 unsafe fn display_uuid(display: u32) -> Option<String> {
   let uuid = Owned::new(ffi::CGDisplayCreateUUIDFromDisplayID(display))?;
   let text = Owned::new(ffi::CFUUIDCreateString(std::ptr::null(), uuid.as_ptr()) as _)?;

@@ -9,11 +9,27 @@ from what is running with an on-device VLM.
 make install   # release build, replace /Applications/Spaces Labels.app, launch
 make run       # debug build with latency/placement diagnostics on stderr
 make probe     # print Spaces, apps per Space, and the cost of each query
+cargo run --release -p app-context --bin context_probe -- --no-chrome   # per-Space context as JSON
 ```
 
-No permissions are needed: Spaces and window ownership come from SkyLight's
-private `CGS*` connection API, which does not require Accessibility or Screen
-Recording.
+The label itself needs no permissions: Spaces and window ownership come from
+SkyLight's private `CGS*` connection API. The **more ▾** view (each desktop's
+windows, tabs and terminals) uses:
+
+| App | Source | Permission |
+| --- | --- | --- |
+| Chrome | AppleScript: tab titles and URLs, window bounds | Automation (prompted) |
+| Firefox (all channels) | each profile's `recovery.jsonlz4` session store (lags ≤ 15 s; private windows are never saved) | none |
+| Ghostty 1.3+ | AppleScript: windows → tabs → terminals (title, working directory) | Automation (prompted) |
+| tmux | `tmux list-windows -a`, keyed by the session name that `set-titles` puts first in the terminal title | none |
+| every app | window titles; also how Ghostty windows are matched | Screen Recording (menu bar → Allow window titles, then relaunch) |
+
+Browser windows are matched to WindowServer windows by bounds, so tabs work
+without Screen Recording. The latest context of every desktop is written to
+`~/Library/Application Support/io.echelon.spaces-labels/context.json`.
+
+The build is ad-hoc signed, so macOS treats each rebuild as a new app and
+permissions have to be granted again after `make install`.
 
 ## How it stays instant
 
@@ -41,7 +57,8 @@ to a window only when they change.
 | Path | Responsibility |
 | --- | --- |
 | `crates/spaces_sys/` | SkyLight/CoreGraphics FFI: Spaces snapshot, active Space, window→Space, apps per Space, display bounds; `spaces_probe` diagnostics binary. |
-| `crates/spaces_labels_app/` | Tauri 2 tray app: per-Space overlay windows (`overlay.rs`), poll/notification/rescan engine (`engine.rs`), settings. |
+| `crates/app_context/` | Per-window context: Chrome/Ghostty AppleScript (`osascript` with a timeout), Firefox session store, tmux; matching to windows. |
+| `crates/spaces_labels_app/` | Tauri 2 tray app: per-Space overlay windows (`overlay.rs`), poll/notification/rescan engine (`engine.rs`), context thread (`context.rs`), settings. Overlays are click-through except where the page reports a clickable region (the "more" link or the open panel), hit-tested at ~60 Hz; a click hands focus straight back to the previous app. |
 | `ui/` | Plain HTML/CSS/JS overlay. |
 
 ## Known limits

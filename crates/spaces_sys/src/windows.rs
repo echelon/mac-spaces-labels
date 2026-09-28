@@ -1,5 +1,5 @@
 use crate::cf::{self, Key, Owned};
-use crate::ffi::{self, ConnectionId, SpaceId};
+use crate::ffi::{self, CgRect, ConnectionId, SpaceId};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -27,6 +27,9 @@ struct Keys {
   width: Key,
   height: Key,
   alpha: Key,
+  name: Key,
+  x: Key,
+  y: Key,
 }
 
 fn keys() -> &'static Keys {
@@ -40,6 +43,9 @@ fn keys() -> &'static Keys {
     width: Key::new("Width"),
     height: Key::new("Height"),
     alpha: Key::new("kCGWindowAlpha"),
+    name: Key::new("kCGWindowName"),
+    x: Key::new("X"),
+    y: Key::new("Y"),
   })
 }
 
@@ -99,22 +105,30 @@ pub fn describe_windows(cid: ConnectionId, pid: i32) -> Vec<String> {
   }
 }
 
-struct Candidate {
-  window_id: u32,
-  pid: i32,
-  name: String,
+/// A normal (layer 0) window that belongs to exactly one Space.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WindowInfo {
+  pub id: u32,
+  pub pid: i32,
+  pub app: String,
+  /// Needs Screen Recording permission; `None` without it (and for the few
+  /// windows that have no title).
+  pub title: Option<String>,
+  pub bounds: CgRect,
+  pub space: SpaceId,
 }
 
-pub(crate) fn apps_by_space(cid: ConnectionId, exclude_pid: i32) -> AppsBySpace {
+/// Normal windows on a single Space, front-most first. Windows on every Space
+/// (sticky palettes, other overlays) say nothing about what a particular
+/// desktop is for, and minimized or background-tab windows are on none.
+pub(crate) fn windows(cid: ConnectionId, exclude_pid: i32) -> Vec<WindowInfo> {
   let k = keys();
-  // Owner names are readable without Screen Recording permission; titles are
-  // not, which is why this lists apps rather than windows.
-  let candidates: Vec<Candidate> = unsafe {
+  let mut out: Vec<WindowInfo> = unsafe {
     let Some(list) = Owned::new(ffi::CGWindowListCopyWindowInfo(
       ffi::WINDOW_LIST_ALL | ffi::WINDOW_LIST_EXCLUDE_DESKTOP,
       0,
     ) as _) else {
-      return AppsBySpace::new();
+      return Vec::new();
     };
     cf::array_items(list.as_ptr())
       .filter_map(|w| {
@@ -132,30 +146,43 @@ pub(crate) fn apps_by_space(cid: ConnectionId, exclude_pid: i32) -> AppsBySpace 
         if side(&k.width) < MIN_WINDOW_SIDE || side(&k.height) < MIN_WINDOW_SIDE {
           return None;
         }
-        let name = cf::dict_get(w, &k.owner_name).and_then(|v| cf::string(v))?;
-        Some(Candidate {
-          window_id: num(&k.number)? as u32,
+        Some(WindowInfo {
+          id: num(&k.number)? as u32,
           pid,
-          name,
+          app: cf::dict_get(w, &k.owner_name).and_then(|v| cf::string(v))?,
+          title: cf::dict_get(w, &k.name)
+            .and_then(|v| cf::string(v))
+            .filter(|t| !t.is_empty()),
+          bounds: CgRect {
+            x: side(&k.x) as f64,
+            y: side(&k.y) as f64,
+            width: side(&k.width) as f64,
+            height: side(&k.height) as f64,
+          },
+          space: 0,
         })
       })
       .collect()
   };
-
-  let mut by_space = AppsBySpace::new();
-  for candidate in candidates {
-    let spaces = spaces_for_window(cid, candidate.window_id);
-    // Windows on every Space (sticky palettes, other overlays) say nothing
-    // about what a particular desktop is for.
-    if spaces.len() != 1 {
-      continue;
+  out.retain_mut(|window| match spaces_for_window(cid, window.id)[..] {
+    [space] => {
+      window.space = space;
+      true
     }
-    let apps = by_space.entry(spaces[0]).or_default();
-    match apps.iter_mut().find(|a| a.pid == candidate.pid) {
+    _ => false,
+  });
+  out
+}
+
+pub(crate) fn apps_by_space(windows: &[WindowInfo]) -> AppsBySpace {
+  let mut by_space = AppsBySpace::new();
+  for window in windows {
+    let apps = by_space.entry(window.space).or_default();
+    match apps.iter_mut().find(|a| a.pid == window.pid) {
       Some(app) => app.windows += 1,
       None => apps.push(AppOnSpace {
-        pid: candidate.pid,
-        name: candidate.name,
+        pid: window.pid,
+        name: window.app.clone(),
         windows: 1,
       }),
     }

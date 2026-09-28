@@ -9,16 +9,21 @@
 //! * a [`RESCAN`] timer, for changes nothing announces (a window opened,
 //!   closed, or dragged to another Space; Spaces added or reordered).
 //!
+//! The slower per-window context (tabs, terminals; see `context`) runs on its
+//! own thread, poked by the same events, and asks the worker to push results.
+//!
 //! The worker reads the world without holding the model lock, reconciles, and
 //! only then touches windows, because creating a window waits on the main
 //! thread and the main thread also takes the lock (menu events, commands).
 
-use crate::model::{self, OverlayState};
-use crate::overlay;
+use crate::model::{self, OverlayState, Sources};
+use crate::overlay::{self, Frame};
 use crate::settings::Settings;
+use app_context::SpaceContext;
 use spaces_sys::{AppsBySpace, Snapshot, SpaceId, SpaceKind, Spaces};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -30,11 +35,20 @@ const RESCAN: Duration = Duration::from_millis(750);
 /// a persistent failure can never turn into a window-creation loop.
 const RETRY_AFTER: Duration = Duration::from_secs(30);
 pub const TRAY_ID: &str = "main";
+/// How often the poll loop hit-tests the pointer against clickable overlay
+/// regions, in poll ticks (8 x 2 ms: about 60 Hz).
+const HOVER_EVERY: u32 = 8;
+
+/// The most recently activated app other than us, to hand focus back to
+/// after a click on an overlay activates this app.
+static LAST_FRONT_PID: AtomicI32 = AtomicI32::new(0);
 
 pub enum Msg {
   Refresh,
   /// Settings changed or displays moved: recompute window positions.
   Relayout,
+  /// New context arrived: only re-send overlay states.
+  Push,
 }
 
 pub struct Overlay {
@@ -42,6 +56,12 @@ pub struct Overlay {
   pub window_number: u32,
   pub display: String,
   pub sent: Option<OverlayState>,
+  /// Where the window is, in global points.
+  pub frame: Frame,
+  /// The clickable region ("more" link or expanded panel), window-relative,
+  /// as reported by the page.
+  pub hit: Option<Frame>,
+  pub expanded: bool,
 }
 
 #[derive(Default)]
@@ -54,18 +74,43 @@ pub struct Model {
   pub failed: HashMap<SpaceId, Instant>,
   /// When the poll last saw the Space change, for latency diagnostics.
   pub last_switch: Option<(SpaceId, Instant)>,
+  /// Per-Space context; `None` until the first context pass finishes.
+  pub contexts: Option<HashMap<SpaceId, SpaceContext>>,
+  pub titles_readable: bool,
+  /// The overlay currently accepting the mouse, if any.
+  pub interactive: Option<String>,
+}
+
+impl Model {
+  pub fn sources(&self) -> Sources<'_> {
+    Sources {
+      snapshot: &self.snapshot,
+      apps: &self.apps,
+      contexts: self.contexts.as_ref(),
+      titles_readable: self.titles_readable,
+      placement: self.settings.placement,
+      show_apps: self.settings.show_apps,
+    }
+  }
+
+  pub fn overlay_by_label(&mut self, label: &str) -> Option<&mut Overlay> {
+    self.overlays.values_mut().find(|o| o.label == label)
+  }
 }
 
 pub struct Engine {
   pub spaces: Spaces,
   pub model: Mutex<Model>,
   pub tx: Mutex<Sender<Msg>>,
+  /// Pokes the context thread.
+  pub context_tx: Mutex<Sender<()>>,
   pub settings_path: PathBuf,
 }
 
 impl Engine {
-  pub fn new(settings_path: PathBuf) -> (Self, Receiver<Msg>) {
+  pub fn new(settings_path: PathBuf) -> (Self, Receiver<Msg>, Receiver<()>) {
     let (tx, rx) = mpsc::channel();
+    let (context_tx, context_rx) = mpsc::channel();
     let settings = Settings::load(&settings_path);
     let model = Model {
       settings,
@@ -76,27 +121,53 @@ impl Engine {
         spaces: Spaces::connect(),
         model: Mutex::new(model),
         tx: Mutex::new(tx),
+        context_tx: Mutex::new(context_tx),
         settings_path,
       },
       rx,
+      context_rx,
     )
   }
 
   pub fn send(&self, msg: Msg) {
+    if matches!(msg, Msg::Refresh) {
+      let _ = self.context_tx.lock().unwrap().send(());
+    }
     let _ = self.tx.lock().unwrap().send(msg);
   }
 
   pub fn state_for_label(&self, label: &str) -> Option<OverlayState> {
     let model = self.model.lock().unwrap();
-    let (space, _) = model.overlays.iter().find(|(_, o)| o.label == label)?;
-    let s = &model.settings;
-    model::overlay_state(
-      &model.snapshot,
-      &model.apps,
-      *space,
-      s.placement,
-      s.show_apps,
-    )
+    let (space, overlay) = model.overlays.iter().find(|(_, o)| o.label == label)?;
+    model::overlay_state(&model.sources(), *space, overlay.expanded)
+  }
+
+  /// Expands or collapses one overlay, then hands focus back to the app the
+  /// click took it from.
+  pub fn set_expanded(&self, app: &AppHandle, label: &str, expanded: bool) {
+    let target = {
+      let mut model = self.model.lock().unwrap();
+      let placement = model.settings.placement;
+      model.overlay_by_label(label).map(|o| {
+        o.expanded = expanded;
+        (o.display.clone(), placement)
+      })
+    };
+    if let Some((display, placement)) = target {
+      if let Some(frame) = overlay::reposition(app, label, &display, placement, expanded) {
+        if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
+          o.frame = frame;
+        }
+      }
+    }
+    restore_focus(app);
+    self.send(Msg::Push);
+  }
+
+  pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>) {
+    if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
+      o.hit = hit;
+    }
   }
 
   pub fn update_settings(&self, change: impl FnOnce(&mut Settings)) {
@@ -128,7 +199,12 @@ pub fn start(app: &AppHandle, rx: Receiver<Msg>) {
 fn poll_loop(app: AppHandle) {
   let engine = app.state::<Engine>();
   let mut last = 0;
+  let mut tick = 0u32;
   loop {
+    tick = tick.wrapping_add(1);
+    if tick.is_multiple_of(HOVER_EVERY) {
+      update_hover(&app, &engine);
+    }
     let active = engine.spaces.active_space();
     if active != last {
       last = active;
@@ -154,17 +230,53 @@ fn poll_loop(app: AppHandle) {
   }
 }
 
+/// Makes the overlay under the pointer clickable when the pointer is over
+/// its clickable region, and every other overlay click-through again.
+fn update_hover(app: &AppHandle, engine: &Engine) {
+  let (x, y) = spaces_sys::mouse_location();
+  let mut model = engine.model.lock().unwrap();
+  let showing: Vec<SpaceId> = model.snapshot.current_spaces().collect();
+  let target = model
+    .overlays
+    .iter()
+    .filter(|(space, _)| showing.contains(space))
+    .find_map(|(_, o)| {
+      let hit = o.hit?.offset(o.frame);
+      hit.contains(x, y).then(|| o.label.clone())
+    });
+  if target == model.interactive {
+    return;
+  }
+  let previous = std::mem::replace(&mut model.interactive, target.clone());
+  drop(model);
+  if let Some(label) = previous {
+    overlay::set_click_through(app, &label, true);
+  }
+  if let Some(label) = target {
+    overlay::set_click_through(app, &label, false);
+  }
+}
+
 fn worker_loop(app: AppHandle, rx: Receiver<Msg>) {
   let mut relayout = true;
   loop {
+    let mut full = true;
     match rx.recv_timeout(RESCAN) {
-      Ok(msg) => relayout |= matches!(msg, Msg::Relayout),
+      Ok(msg) => {
+        relayout |= matches!(msg, Msg::Relayout);
+        full = !matches!(msg, Msg::Push);
+      }
       Err(RecvTimeoutError::Timeout) => {}
       Err(RecvTimeoutError::Disconnected) => return,
     }
     // Coalesce a burst (a switch fires the poll and a notification) into one pass.
     while let Ok(msg) = rx.try_recv() {
       relayout |= matches!(msg, Msg::Relayout);
+      full |= !matches!(msg, Msg::Push);
+    }
+    if !full {
+      push_states(&app, &app.state::<Engine>());
+      continue;
     }
     let started = Instant::now();
     reconcile(&app, std::mem::take(&mut relayout));
@@ -229,11 +341,11 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   model.snapshot = snapshot;
   model.apps = apps;
   let placement = model.settings.placement;
-  let relayout_targets: Vec<(String, String)> = if relayout {
+  let relayout_targets: Vec<(String, String, bool)> = if relayout {
     model
       .overlays
       .values()
-      .map(|o| (o.label.clone(), o.display.clone()))
+      .map(|o| (o.label.clone(), o.display.clone(), o.expanded))
       .collect()
   } else {
     Vec::new()
@@ -246,8 +358,12 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   for label in to_close {
     overlay::close(app, &label);
   }
-  for (label, display) in relayout_targets {
-    overlay::reposition(app, &label, &display, placement);
+  for (label, display, expanded) in relayout_targets {
+    if let Some(frame) = overlay::reposition(app, &label, &display, placement, expanded) {
+      if let Some(o) = engine.model.lock().unwrap().overlay_by_label(&label) {
+        o.frame = frame;
+      }
+    }
   }
   for Pending { space, display } in to_create {
     let created = overlay::create(app, spaces, &display, placement, space);
@@ -262,6 +378,9 @@ fn reconcile(app: &AppHandle, relayout: bool) {
             window_number: created.window_number,
             display,
             sent: None,
+            frame: created.frame,
+            hit: None,
+            expanded: false,
           },
         );
       }
@@ -285,17 +404,20 @@ fn push_states(app: &AppHandle, engine: &Engine) {
   {
     let mut model = engine.model.lock().unwrap();
     let model = &mut *model;
-    let (placement, show_apps) = (model.settings.placement, model.settings.show_apps);
-    for (space, overlay) in model.overlays.iter_mut() {
-      let Some(state) =
-        model::overlay_state(&model.snapshot, &model.apps, *space, placement, show_apps)
-      else {
+    let sources = model.sources();
+    let mut changed = Vec::new();
+    for (space, overlay) in &model.overlays {
+      let Some(state) = model::overlay_state(&sources, *space, overlay.expanded) else {
         continue;
       };
       if overlay.sent.as_ref() != Some(&state) {
-        overlay.sent = Some(state.clone());
-        outgoing.push((overlay.label.clone(), state));
+        changed.push((*space, state));
       }
+    }
+    for (space, state) in changed {
+      let overlay = model.overlays.get_mut(&space).unwrap();
+      overlay.sent = Some(state.clone());
+      outgoing.push((overlay.label.clone(), state));
     }
   }
   for (label, state) in outgoing {
@@ -329,7 +451,7 @@ pub fn observe_workspace(app: &AppHandle) {
   };
   for (i, name) in names.into_iter().enumerate() {
     let app = app.clone();
-    let is_space_change = i == 0;
+    let is_space_change = i == 0; // Order of `names` above; 3 is activation.
     let block = RcBlock::new(move |_: NonNull<NSNotification>| {
       let engine = app.state::<Engine>();
       if is_space_change && debug_enabled() {
@@ -342,6 +464,9 @@ pub fn observe_workspace(app: &AppHandle) {
           _ => eprintln!("[notify] NSWorkspace space change arrived before the poll saw it"),
         }
       }
+      if i == 3 {
+        remember_front_app();
+      }
       engine.send(Msg::Refresh);
     });
     let observer =
@@ -349,4 +474,36 @@ pub fn observe_workspace(app: &AppHandle) {
     // Observers live as long as the app.
     std::mem::forget(observer);
   }
+}
+
+/// Records the frontmost app unless it is us. Main thread (notification).
+#[cfg(target_os = "macos")]
+fn remember_front_app() {
+  use objc2_app_kit::NSWorkspace;
+  if let Some(front) = NSWorkspace::sharedWorkspace().frontmostApplication() {
+    let pid = front.processIdentifier();
+    if pid != std::process::id() as i32 {
+      LAST_FRONT_PID.store(pid, Ordering::Relaxed);
+    }
+  }
+}
+
+/// A click on an overlay activates this (accessory) app and takes focus from
+/// whatever the user was working in. Give it straight back.
+#[cfg(target_os = "macos")]
+fn restore_focus(app: &AppHandle) {
+  let pid = LAST_FRONT_PID.load(Ordering::Relaxed);
+  if pid == 0 {
+    return;
+  }
+  let _ = app.run_on_main_thread(move || {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    if !NSRunningApplication::currentApplication().isActive() {
+      return;
+    }
+    if let Some(previous) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+      #[allow(deprecated)]
+      previous.activateWithOptions(NSApplicationActivationOptions::empty());
+    }
+  });
 }

@@ -1,7 +1,9 @@
 //! What each overlay window shows, derived from the latest Spaces snapshot.
 
+use app_context::SpaceContext;
 use serde::{Deserialize, Serialize};
 use spaces_sys::{AppsBySpace, Snapshot, Space, SpaceId, SpaceKind};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,12 +69,28 @@ impl Placement {
   }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct OverlayState {
   pub space_id: SpaceId,
   pub name: String,
   pub color: &'static str,
   pub apps: Vec<String>,
+  pub placement: Placement,
+  pub show_apps: bool,
+  /// Tabs, terminals and titles for the "more" view. `None` until the first
+  /// (slower) context pass has run.
+  pub context: Option<SpaceContext>,
+  /// Screen Recording granted, so other apps' window titles are known.
+  pub titles_readable: bool,
+  pub expanded: bool,
+}
+
+/// Everything an overlay's state is derived from.
+pub struct Sources<'a> {
+  pub snapshot: &'a Snapshot,
+  pub apps: &'a AppsBySpace,
+  pub contexts: Option<&'a HashMap<SpaceId, SpaceContext>>,
+  pub titles_readable: bool,
   pub placement: Placement,
   pub show_apps: bool,
 }
@@ -92,16 +110,11 @@ pub fn space_name(space: &Space) -> String {
   }
 }
 
-pub fn overlay_state(
-  snapshot: &Snapshot,
-  apps: &AppsBySpace,
-  space_id: SpaceId,
-  placement: Placement,
-  show_apps: bool,
-) -> Option<OverlayState> {
-  let (_, space) = snapshot.space(space_id)?;
+pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Option<OverlayState> {
+  let (_, space) = sources.snapshot.space(space_id)?;
   let color = PALETTE[space.desktop_number.unwrap_or(0).saturating_sub(1) % PALETTE.len()];
-  let apps = apps
+  let apps = sources
+    .apps
     .get(&space_id)
     .map(|list| list.iter().map(|a| a.name.clone()).collect())
     .unwrap_or_default();
@@ -110,7 +123,12 @@ pub fn overlay_state(
     name: space_name(space),
     color,
     apps,
-    placement,
-    show_apps,
+    placement: sources.placement,
+    show_apps: sources.show_apps,
+    context: sources
+      .contexts
+      .map(|all| all.get(&space_id).cloned().unwrap_or_default()),
+    titles_readable: sources.titles_readable,
+    expanded,
   })
 }

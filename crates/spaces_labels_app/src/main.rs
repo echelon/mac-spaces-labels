@@ -1,7 +1,10 @@
 //! Spaces Labels: a big, transparent, click-through name on every macOS
-//! desktop, plus the apps running there. See `engine` for how it stays in sync
-//! and `overlay` for why each Space gets its own window.
+//! desktop, plus the apps running there and (under "more") their tabs,
+//! terminals and window titles. See `engine` for how it stays in sync,
+//! `overlay` for why each Space gets its own window, and `context` for the
+//! per-window details.
 
+mod context;
 mod engine;
 mod model;
 mod overlay;
@@ -18,7 +21,21 @@ fn overlay_state(window: WebviewWindow, engine: State<Engine>) -> Option<Overlay
   engine.state_for_label(window.label())
 }
 
-fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
+#[tauri::command]
+fn set_expanded(window: WebviewWindow, engine: State<Engine>, expanded: bool) {
+  engine.set_expanded(window.app_handle(), window.label(), expanded);
+}
+
+/// The page reports its clickable region (window-relative points), or `None`.
+#[tauri::command]
+fn set_hit_rect(window: WebviewWindow, engine: State<Engine>, rect: Option<overlay::Frame>) {
+  engine.set_hit_rect(window.label(), rect);
+}
+
+const SCREEN_RECORDING_SETTINGS: &str =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+
+fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri::Result<()> {
   let settings = engine.model.lock().unwrap().settings.clone();
   let check = |(placement, name): (Placement, &str)| {
     CheckMenuItem::with_id(
@@ -58,15 +75,22 @@ fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
     None::<&str>,
   )?;
   let quit = MenuItem::with_id(app, "quit", "Quit Spaces Labels", true, Some("Cmd+Q"))?;
-  let menu = Menu::with_items(
+  // Window titles need Screen Recording; macOS applies a grant on relaunch.
+  let allow_titles = MenuItem::with_id(
     app,
-    &[
-      &position,
-      &show_apps,
-      &PredefinedMenuItem::separator(app)?,
-      &quit,
-    ],
+    "allow_titles",
+    "Allow window titles (Screen Recording)…",
+    true,
+    None::<&str>,
   )?;
+  let separator = PredefinedMenuItem::separator(app)?;
+  let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&position, &show_apps];
+  if titles_missing {
+    items.push(&allow_titles);
+  }
+  items.push(&separator);
+  items.push(&quit);
+  let menu = Menu::with_items(app, &items)?;
 
   TrayIconBuilder::with_id(TRAY_ID)
     .icon(tauri::image::Image::from_bytes(include_bytes!(
@@ -81,6 +105,11 @@ fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
       let engine = app.state::<Engine>();
       match event.id().as_ref() {
         "quit" => app.exit(0),
+        "allow_titles" => {
+          let _ = std::process::Command::new("/usr/bin/open")
+            .arg(SCREEN_RECORDING_SETTINGS)
+            .spawn();
+        }
         "show_apps" => engine.update_settings(|s| s.show_apps = !s.show_apps),
         id => {
           if let Some((placement, _)) = Placement::all().find(|(p, _)| p.id() == id) {
@@ -98,17 +127,28 @@ fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
 
 fn main() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![overlay_state])
+    .invoke_handler(tauri::generate_handler![
+      overlay_state,
+      set_expanded,
+      set_hit_rect
+    ])
     .setup(|app| {
       #[cfg(target_os = "macos")]
       app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-      let settings_path = app.path().app_config_dir()?.join("settings.json");
-      let (engine, rx) = Engine::new(settings_path);
-      build_tray(app, &engine)?;
+      let config_dir = app.path().app_config_dir()?;
+      let (engine, rx, context_rx) = Engine::new(config_dir.join("settings.json"));
+      let titles_missing = !spaces_sys::can_read_titles();
+      if titles_missing {
+        // Shows the system prompt the first time; afterwards the menu item
+        // leads to System Settings.
+        spaces_sys::request_title_access();
+      }
+      build_tray(app, &engine, titles_missing)?;
       app.manage(engine);
       #[cfg(target_os = "macos")]
       engine::observe_workspace(app.handle());
       engine::start(app.handle(), rx);
+      context::start(app.handle(), context_rx, config_dir.join("context.json"));
       Ok(())
     })
     .build(tauri::generate_context!())
