@@ -9,10 +9,11 @@
 <body>
   <main id="label" class="label" hidden>
     <div class="head">
-      <h1 id="name"></h1>
+      <p id="eyebrow" class="eyebrow"></p>
       <button id="rename-open" class="link" type="button" hidden>✎ Rename</button>
     </div>
-    <p id="desktop" class="sub" hidden></p>
+    <h1 id="name"></h1>
+    <p id="subtitle" class="subtitle" hidden></p>
     <p id="summary" class="summary" hidden></p>
     <form id="rename" class="rename" hidden>
       <label>Name <input id="rename-name" maxlength="40" autocomplete="off" spellcheck="false"></label>
@@ -24,8 +25,7 @@
       </div>
       <p class="fine">Saved with this desktop's context and the AI's suggestion (feedback.jsonl) for evals.</p>
     </form>
-    <ul id="apps" class="apps"></ul>
-    <p id="focus" class="focus" hidden></p>
+    <ul id="chips" class="chips"></ul>
     <div id="details" class="details" hidden></div>
     <button id="more" class="more" type="button"></button>
   </main>

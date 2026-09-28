@@ -229,12 +229,13 @@ fn name_space(
   if debug_enabled() {
     eprintln!("[naming] space {} ({seconds:.2}s): {result:?}", job.space);
   }
-  let Ok((name, summary)) = result else {
+  let Ok((name, task, summary)) = result else {
     return;
   };
   let mut model = engine.model.lock().unwrap();
   model.names.entry(job.uuid).or_default().ai = Some(naming::AiName {
     name,
+    task: Some(task),
     summary,
     model: model_name.into(),
     at_unix: naming::now_unix(),
@@ -527,7 +528,7 @@ fn dechunk(mut data: &[u8]) -> Vec<u8> {
   out
 }
 
-fn base64(bytes: &[u8]) -> String {
+pub fn base64(bytes: &[u8]) -> String {
   const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
   for chunk in bytes.chunks(3) {

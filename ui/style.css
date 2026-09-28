@@ -1,9 +1,18 @@
-/* The window is transparent and click-through; only the text is visible.
-   Heavy shadows keep it legible over any wallpaper or window. */
+/* The window is transparent and click-through; only the label panel is
+   visible. Hierarchy: eyebrow (Mission Control name), title (fitted to one
+   line, never truncated), subtitle (the task), app/agent chips. */
 :root {
   --accent: #748ffc;
-  --text: rgba(255, 255, 255, 0.92);
-  --muted: rgba(255, 255, 255, 0.78);
+  --text: rgba(255, 255, 255, 0.95);
+  --muted: rgba(255, 255, 255, 0.72);
+  --panel: rgba(10, 12, 22, 0.85);
+  --cat-code: #69db7c;
+  --cat-research: #4dabf7;
+  --cat-github: #b197fc;
+  --cat-fun: #ff8787;
+  --cat-comms: #3bc9db;
+  --cat-notes: #ffd43b;
+  --cat-other: #adb5bd;
 }
 
 html, body {
@@ -17,151 +26,183 @@ html, body {
   cursor: default;
 }
 
-body {
-  display: flex;
-  padding: 4px;
-  box-sizing: border-box;
-}
+body { display: flex; padding: 4px; box-sizing: border-box; }
 
-/* Placement classes anchor the label inside the window, which Rust sizes
-   and positions per placement. */
+/* Placement classes anchor the label inside the window, which Rust sizes and
+   positions per placement. */
 body.top_left { align-items: flex-start; justify-content: flex-start; }
 body.top_right { align-items: flex-start; justify-content: flex-end; }
 body.bottom_left { align-items: flex-end; justify-content: flex-start; }
 body.bottom_right { align-items: flex-end; justify-content: flex-end; }
-body.top_right .label, body.bottom_right .label { text-align: right; align-items: flex-end; }
+body.center, body.center_big, body.hero, body.hero_big { align-items: center; justify-content: center; }
 
 .label {
+  --title-max: 34;
+  --subtitle-size: 14px;
+  --chip-size: 12px;
+  --icon-size: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   max-width: 100%;
-  padding: 10px 16px 12px;
-  border-radius: 14px;
-  background: rgba(12, 14, 26, 0.5);
+  box-sizing: border-box;
+  padding: 12px 18px 12px;
+  border-radius: 16px;
+  background: var(--panel);
   border-left: 4px solid var(--accent);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
 }
+.label[hidden] { display: none; }
 body.top_right .label, body.bottom_right .label {
+  text-align: right;
+  align-items: flex-end;
   border-left: none;
   border-right: 4px solid var(--accent);
 }
-
-.label[hidden] { display: none; }
-
-h1 {
-  margin: 0;
-  font-size: 34px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.05;
-  color: var(--text);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65), 0 0 14px rgba(0, 0, 0, 0.45);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.apps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5);
-}
-
-.apps li {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.apps li::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: 2px;
-}
-body.top_right .apps li::before, body.bottom_right .apps li::before { display: none; }
-body.top_right .apps li::after, body.bottom_right .apps li::after {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: 2px;
-}
-
-.apps .more-apps { opacity: 0.75; font-weight: 500; }
-.apps .more-apps::before, .apps .more-apps::after { visibility: hidden; }
-.apps[hidden] { display: none; }
-
-/* Centered placements: the window itself is centered on screen, so center
-   the label inside it; the accent moves under the name. */
-body.center, body.center_big, body.hero, body.hero_big { align-items: center; justify-content: center; }
 body.center .label, body.center_big .label, body.hero .label, body.hero_big .label {
   align-items: center;
   text-align: center;
   border-left: none;
   border-bottom: 4px solid var(--accent);
-  padding: 14px 28px 16px;
-  border-radius: 20px;
 }
-body.center .apps, body.center_big .apps, body.hero .apps, body.hero_big .apps {
-  flex-direction: row;
+body.center .label, body.hero .label {
+  --title-max: 52;
+  --subtitle-size: 18px;
+  --chip-size: 13px;
+  --icon-size: 18px;
+  padding: 16px 28px 14px;
+  border-radius: 22px;
+}
+body.center_big .label, body.hero_big .label {
+  --title-max: 84;
+  --subtitle-size: 26px;
+  --chip-size: 15px;
+  --icon-size: 22px;
+  gap: 10px;
+  padding: 22px 44px 18px;
+  border-radius: 30px;
+  border-bottom-width: 6px;
+}
+
+.head { display: flex; align-items: center; gap: 12px; max-width: 100%; }
+body.expanded .head { justify-content: space-between; align-self: stretch; }
+
+.eyebrow {
+  margin: 0;
+  font-size: calc(var(--chip-size) - 1px);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1 {
+  margin: 0;
+  max-width: 100%;
+  font-size: calc(var(--title-max) * 1px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Last resort for very long names: wrap, never cut off. */
+h1.wrap { white-space: normal; text-wrap: balance; overflow: visible; }
+
+.subtitle {
+  margin: 0;
+  max-width: 100%;
+  font-size: var(--subtitle-size);
+  font-weight: 600;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.86);
+  text-wrap: balance;
+}
+.subtitle[hidden], .summary[hidden], .rename[hidden], .link[hidden] { display: none; }
+.summary { margin: 0 0 4px; font-size: 13px; line-height: 1.4; color: rgba(255, 255, 255, 0.8); }
+
+/* App and agent chips, colored by what the app is for. */
+.chips {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  column-gap: 18px;
+  gap: 6px 8px;
+  justify-content: inherit;
+  font-size: var(--chip-size);
+  font-weight: 600;
 }
-
-body.center h1, body.hero h1 { font-size: 56px; }
-body.center .apps, body.hero .apps { font-size: 16px; }
-
-body.center_big .label, body.hero_big .label { padding: 24px 48px 28px; border-radius: 32px; border-bottom-width: 6px; gap: 12px; }
-body.center_big h1, body.hero_big h1 { font-size: 128px; letter-spacing: -0.03em; }
-body.center_big .apps, body.hero_big .apps { font-size: 26px; column-gap: 28px; }
-body.center_big .apps li::before, body.hero_big .apps li::before { width: 10px; height: 10px; margin-right: 10px; vertical-align: 4px; }
+body.center .chips, body.center_big .chips, body.hero .chips, body.hero_big .chips { justify-content: center; }
+body.top_right .chips, body.bottom_right .chips { justify-content: flex-end; }
+.chips[hidden] { display: none; }
+.chip {
+  --cat: var(--cat-other);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cat) 55%, transparent);
+  color: rgba(255, 255, 255, 0.82);
+  white-space: nowrap;
+}
+.chip-more { padding-left: 10px; }
+.cat-code { --cat: var(--cat-code); }
+.cat-research { --cat: var(--cat-research); }
+.cat-github { --cat: var(--cat-github); }
+.cat-fun { --cat: var(--cat-fun); }
+.cat-comms { --cat: var(--cat-comms); }
+.cat-notes { --cat: var(--cat-notes); }
+.cat-other { --cat: var(--cat-other); }
+.icon { width: var(--icon-size); height: var(--icon-size); flex: 0 0 auto; }
+.icon.placeholder { border-radius: 5px; background: var(--cat); opacity: 0.6; }
+.chip-state {
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 0.8em;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
+}
+.agent-working .chip-state { color: #0b2e13; background: var(--cat-code); animation: pulse 1.6s ease-in-out infinite; }
+.agent-waiting .chip-state { color: #3b2a00; background: var(--cat-notes); }
+@keyframes pulse { 50% { opacity: 0.55; } }
 
 /* "more" link: the only clickable part of a collapsed label. */
 .more {
   align-self: inherit;
-  margin: 2px 0 0;
+  margin: 0;
   padding: 2px 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(var(--chip-size) - 1px);
   font-weight: 700;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   cursor: pointer;
 }
 .more:hover { color: var(--text); background: rgba(255, 255, 255, 0.14); }
-body.center_big .more, body.hero_big .more { font-size: 18px; }
 
 /* Expanded: an opaque, scrollable panel filling the (resized) window. Lists
    read best left-aligned, whatever the placement. */
-body.expanded .label {
+body.expanded .label, body.expanded.center_big .label, body.expanded.hero_big .label {
+  --title-max: 40;
+  --subtitle-size: 17px;
+  --chip-size: 13px;
   width: 100%;
   max-height: 100%;
   box-sizing: border-box;
-  background: rgba(12, 14, 26, 0.9);
+  padding: 18px 24px 14px;
+  background: rgba(12, 14, 26, 0.94);
   text-align: left;
   align-items: stretch;
 }
-body.expanded h1 { font-size: 34px; }
 body.expanded .more { align-self: flex-start; }
 
 .details {
@@ -233,21 +274,6 @@ body.expanded .more { align-self: flex-start; }
 }
 .details .overflow { color: var(--muted); font-style: italic; }
 
-/* The desktop's main project(s), under the app list. */
-.focus {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-.focus[hidden] { display: none; }
-body.center .focus, body.hero .focus { font-size: 16px; }
-body.center_big .focus, body.hero_big .focus { font-size: 24px; }
 
 .details .status {
   flex: 0 0 auto;
@@ -282,23 +308,11 @@ body.center_big .focus, body.hero_big .focus { font-size: 24px; }
   background: rgba(21, 170, 191, 0.14);
 }
 
-/* Name row, source line and the rename form. */
-.head { display: flex; align-items: baseline; gap: 12px; max-width: 100%; min-width: 0; }
-body.top_right .head, body.bottom_right .head { justify-content: flex-end; }
-body.center .head, body.center_big .head, body.hero .head, body.hero_big .head { justify-content: center; }
-body.expanded .head { justify-content: space-between; }
-.head h1 { min-width: 0; }
-.sub {
-  margin: -2px 0 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-.sub[hidden], .summary[hidden], .rename[hidden], .link[hidden] { display: none; }
-body.center_big .sub, body.hero_big .sub { font-size: 16px; }
-.summary { margin: 2px 0 4px; font-size: 13px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); }
+
+/* Expanded app sections: headings in the app's category color. */
+.details h2 { display: flex; align-items: center; gap: 6px; color: var(--cat, var(--accent)); }
+.details h2 .icon { width: 16px; height: 16px; }
+
 .link {
   flex: 0 0 auto;
   padding: 3px 9px;

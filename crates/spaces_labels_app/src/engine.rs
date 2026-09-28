@@ -84,6 +84,8 @@ pub struct Model {
   pub vision_status: crate::vision::VisionStatus,
   /// Desktop names (yours and the model's), by Space UUID.
   pub names: crate::naming::NameStore,
+  /// App name -> icon data URL (`None` when it has no icon).
+  pub icons: HashMap<String, Option<String>>,
 }
 
 impl Model {
@@ -98,7 +100,14 @@ impl Model {
       vision: &self.vision,
       vision_status: &self.vision_status,
       names: &self.names,
+      aliases: &self.settings.project_names,
+      icons: &self.icons,
     }
+  }
+
+  pub fn title_for(&self, space: &spaces_sys::Space) -> String {
+    let context = self.contexts.as_ref().and_then(|all| all.get(&space.id));
+    model::titles(space, &self.names, context, &self.settings.project_names).title
   }
 
   pub fn overlay_by_label(&mut self, label: &str) -> Option<&mut Overlay> {
@@ -293,7 +302,7 @@ fn poll_loop(app: AppHandle) {
         model
           .snapshot
           .space(active)
-          .map(|(_, space)| model::display_name(space, &model.names).0)
+          .map(|(_, space)| model.title_for(space))
       };
       // Unknown Space (just created): the worker's snapshot will name it.
       if let (Some(title), Some(tray)) = (title, app.tray_by_id(TRAY_ID)) {
@@ -381,7 +390,7 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   let mut model = engine.model.lock().unwrap();
   let active_title = snapshot
     .space(spaces.active_space())
-    .map(|(_, s)| model::display_name(s, &model.names).0);
+    .map(|(_, s)| model.title_for(s));
 
   // Drop overlays whose Space is gone, or whose window is not (only) on its
   // Space: a switch raced its creation, or the window was closed.
@@ -416,6 +425,15 @@ fn reconcile(app: &AppHandle, relayout: bool) {
       }
     }
   }
+  // Icons for apps seen for the first time (rendered below, unlocked).
+  let mut new_icons: Vec<(String, i32)> = Vec::new();
+  for app_on_space in apps.values().flatten() {
+    if !model.icons.contains_key(&app_on_space.name)
+      && !new_icons.iter().any(|(n, _)| *n == app_on_space.name)
+    {
+      new_icons.push((app_on_space.name.clone(), app_on_space.pid));
+    }
+  }
   model.snapshot = snapshot;
   model.apps = apps;
   let placement = model.settings.placement;
@@ -432,6 +450,10 @@ fn reconcile(app: &AppHandle, relayout: bool) {
 
   if let (Some(title), Some(tray)) = (active_title, app.tray_by_id(TRAY_ID)) {
     let _ = tray.set_title(Some(tray_title(&title)));
+  }
+  if !new_icons.is_empty() {
+    let rendered = crate::icons::render(app, new_icons);
+    engine.model.lock().unwrap().icons.extend(rendered);
   }
   for label in to_close {
     overlay::close(app, &label);

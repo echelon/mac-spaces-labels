@@ -1,5 +1,6 @@
 //! What each overlay window shows, derived from the latest Spaces snapshot.
 
+use crate::headline::{self, Chip};
 use crate::naming::NameStore;
 use crate::vision::{VisionNote, VisionStatus};
 use app_context::SpaceContext;
@@ -13,7 +14,6 @@ pub enum Placement {
   TopLeft,
   TopRight,
   BottomLeft,
-  #[default]
   BottomRight,
   /// Dead center of the screen.
   Center,
@@ -22,7 +22,8 @@ pub enum Placement {
   /// Centered horizontally, vertically centered on the top quarter line:
   /// where the eye lands mid-switch, like a website's hero section.
   Hero,
-  /// Hero position at poster size.
+  /// Hero position at poster size (the default).
+  #[default]
   HeroBig,
 }
 
@@ -76,8 +77,13 @@ pub struct OverlayState {
   pub space_id: SpaceId,
   /// Your name for the desktop, else the model's, else `desktop`.
   pub name: String,
-  /// "user", "ai" or "default".
+  /// "user", "auto", "ai" or "default".
   pub name_source: &'static str,
+  pub subtitle: Option<String>,
+  /// Agents and apps under the title, with category colors.
+  pub chips: Vec<Chip>,
+  /// App name -> icon data URL, for this desktop's apps.
+  pub icons: HashMap<String, String>,
   /// Mission Control's name ("Desktop 3").
   pub desktop: String,
   pub ai_name: Option<String>,
@@ -107,19 +113,9 @@ pub struct Sources<'a> {
   pub vision: &'a HashMap<u32, VisionNote>,
   pub vision_status: &'a VisionStatus,
   pub names: &'a NameStore,
-}
-
-/// What to call a desktop: your name, else the model's, else Mission
-/// Control's. Returns the name and where it came from.
-pub fn display_name(space: &Space, names: &NameStore) -> (String, &'static str) {
-  let entry = names.get(&space.uuid);
-  if let Some(user) = entry.and_then(|n| n.user.as_ref()) {
-    return (user.name.clone(), "user");
-  }
-  if let Some(ai) = entry.and_then(|n| n.ai.as_ref()) {
-    return (ai.name.clone(), "ai");
-  }
-  (space_name(space), "default")
+  pub aliases: &'a HashMap<String, String>,
+  /// App name -> icon data URL.
+  pub icons: &'a HashMap<String, Option<String>>,
 }
 
 /// Fills in the vision model's latest description of each window.
@@ -128,6 +124,61 @@ pub fn with_vision(mut context: SpaceContext, vision: &HashMap<u32, VisionNote>)
     window.vision = vision.get(&window.id).map(|note| note.text.clone());
   }
   context
+}
+
+pub struct Titles {
+  pub title: String,
+  /// "user", "auto" (projects/apps), "ai" or "default".
+  pub source: &'static str,
+  pub subtitle: Option<String>,
+}
+
+/// What to call a desktop, most trusted first: your name; the title computed
+/// from its projects and apps ("ArtCraft Services (Claude)"); the model's
+/// name; Mission Control's. The subtitle is your description, else the
+/// model's task.
+pub fn titles(
+  space: &Space,
+  names: &NameStore,
+  context: Option<&SpaceContext>,
+  aliases: &HashMap<String, String>,
+) -> Titles {
+  let entry = names.get(&space.uuid);
+  let ai = entry.and_then(|n| n.ai.as_ref());
+  let ai_task = ai.and_then(|a| {
+    a.task
+      .clone()
+      .or_else(|| a.name.rsplit(": ").next().map(str::to_string))
+  });
+  if let Some(user) = entry.and_then(|n| n.user.as_ref()) {
+    let description = Some(user.description.clone()).filter(|d| !d.is_empty());
+    return Titles {
+      title: user.name.clone(),
+      source: "user",
+      subtitle: description.or(ai_task),
+    };
+  }
+  if let Some(title) = context.and_then(|c| headline::title(c, aliases)) {
+    // A topic desktop's model name can duplicate the computed title.
+    let subtitle = ai_task.filter(|t| !title.starts_with(t.as_str()));
+    return Titles {
+      title,
+      source: "auto",
+      subtitle,
+    };
+  }
+  if let Some(ai) = ai {
+    return Titles {
+      title: ai.name.clone(),
+      source: "ai",
+      subtitle: None,
+    };
+  }
+  Titles {
+    title: space_name(space),
+    source: "default",
+    subtitle: None,
+  }
 }
 
 /// Distinct hues so neighbouring desktops never look alike. Placeholder until
@@ -153,12 +204,29 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     .get(&space_id)
     .map(|list| list.iter().map(|a| a.name.clone()).collect())
     .unwrap_or_default();
-  let (name, name_source) = display_name(space, sources.names);
+  let context = sources.contexts.map(|all| {
+    with_vision(
+      all.get(&space_id).cloned().unwrap_or_default(),
+      sources.vision,
+    )
+  });
+  let titles = titles(space, sources.names, context.as_ref(), sources.aliases);
+  let chips = match &context {
+    Some(context) => headline::chips(context),
+    None => Vec::new(),
+  };
+  let icons = chips
+    .iter()
+    .filter_map(|c| Some((c.label.clone(), sources.icons.get(&c.label)?.clone()?)))
+    .collect();
   let entry = sources.names.get(&space.uuid);
   Some(OverlayState {
     space_id,
-    name,
-    name_source,
+    name: titles.title,
+    name_source: titles.source,
+    subtitle: titles.subtitle,
+    chips,
+    icons,
     desktop: space_name(space),
     ai_name: entry.and_then(|n| n.ai.as_ref()).map(|a| a.name.clone()),
     ai_summary: entry.and_then(|n| n.ai.as_ref()).map(|a| a.summary.clone()),
@@ -170,12 +238,7 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     apps,
     placement: sources.placement,
     show_apps: sources.show_apps,
-    context: sources.contexts.map(|all| {
-      with_vision(
-        all.get(&space_id).cloned().unwrap_or_default(),
-        sources.vision,
-      )
-    }),
+    context,
     titles_readable: sources.titles_readable,
     expanded,
     vision: sources.vision_status.clone(),

@@ -23,5 +23,5 @@ serde_json.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 block2.workspace = true
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["std", "block2", "NSString", "NSNotification", "NSObject", "NSOperation", "NSProcessInfo"] }
-objc2-app-kit = { workspace = true, features = ["std", "NSWindow", "NSResponder", "NSWorkspace", "NSGraphics", "NSRunningApplication", "libc"] }
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSString", "NSNotification", "NSObject", "NSOperation", "NSProcessInfo", "NSGeometry", "NSData", "NSDictionary"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSWindow", "NSResponder", "NSWorkspace", "NSGraphics", "NSRunningApplication", "libc", "NSImage", "NSImageRep", "NSBitmapImageRep"] }

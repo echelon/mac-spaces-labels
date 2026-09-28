@@ -1,5 +1,6 @@
 use crate::model::Placement;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// User preferences from the tray menu, persisted as JSON. A missing or
@@ -13,6 +14,9 @@ pub struct Settings {
   pub show_apps: bool,
   /// Describe windows with the local vision model (when installed).
   pub vision: bool,
+  /// Repository directory name -> how to show it ("artcraft" -> "ArtCraft
+  /// Desktop"). Others are title-cased from the directory name.
+  pub project_names: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -21,6 +25,7 @@ impl Default for Settings {
       placement: Placement::default(),
       show_apps: true,
       vision: true,
+      project_names: HashMap::new(),
     }
   }
 }

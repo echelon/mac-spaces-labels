@@ -32,8 +32,17 @@ Each desktop also gets a **projects** list (the repository roots its agents,
 terminals, dev sites and IDE windows point at, most active first), shown under
 the app list, e.g. "artcraft · Claude working · dev site :4201".
 
+**Title and chips** (`headline.rs`, deterministic): a desktop with a project
+is titled "<Project> (<tools>)", e.g. "ArtCraft Services (Claude)" or
+"ArtCraft Desktop (RustRover)"; display names come from `project_names` in
+`settings.json`, else the directory name title-cased. Without a project it is
+titled by use: Communications, Fun, Research, GitHub, Notes, Coding (browsers
+are classified by their tabs' sites, active tabs weighted most). The title
+shrinks to fit on one line and never truncates. Chips show agents (with
+working/waiting/idle) and apps (real macOS icons), outlined by category.
+
 **Naming.** The same local model names each desktop from a compact digest of
-all of the above (`naming.rs`). When a project is known the name is
+all of the above (`naming.rs`); it supplies the subtitle. When a project is known the name is
 "<project>: <task>" and the model only writes the task (small models otherwise
 drift to app names or the agent's latest step); otherwise it names the topic.
 Names are cached by desktop UUID in `names.json` and are sticky: a new desktop

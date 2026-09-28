@@ -6,6 +6,8 @@
 
 mod context;
 mod engine;
+mod headline;
+mod icons;
 mod model;
 mod naming;
 mod overlay;

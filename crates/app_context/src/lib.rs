@@ -264,6 +264,17 @@ impl Collector {
   }
 }
 
+impl Project {
+  pub fn new(name: &str, signals: &[&str]) -> Self {
+    Self {
+      name: name.to_string(),
+      path: None,
+      signals: signals.iter().map(|s| s.to_string()).collect(),
+      score: 0,
+    }
+  }
+}
+
 /// Accumulates project evidence for one Space.
 #[derive(Default)]
 struct Projects {

@@ -38,6 +38,9 @@ pub struct SpaceNames {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AiName {
   pub name: String,
+  /// The task (or, without a project, the topic) alone: the subtitle.
+  #[serde(default)]
+  pub task: Option<String>,
   pub summary: String,
   pub model: String,
   pub at_unix: u64,
@@ -230,7 +233,11 @@ short sentence}.";
 
 /// Names a desktop: "<project>: <task>", or a topic when there is no
 /// project. ~0.5–1.5 s on Apple silicon.
-pub fn name(port: u16, digest: &str, project: Option<&str>) -> Result<(String, String), String> {
+pub fn name(
+  port: u16,
+  digest: &str,
+  project: Option<&str>,
+) -> Result<(String, String, String), String> {
   let (system, key) = match project {
     Some(project) => (TASK_PROMPT.replace("{project}", project), "task"),
     None => (TOPIC_PROMPT.to_string(), "name"),
@@ -271,9 +278,9 @@ pub fn name(port: u16, digest: &str, project: Option<&str>) -> Result<(String, S
   }
   let name = match project {
     Some(project) => format!("{project}: {label}"),
-    None => label,
+    None => label.clone(),
   };
-  Ok((name, summary))
+  Ok((name, label, summary))
 }
 
 /// Appends a rename (with what the model saw and said) to the eval log.

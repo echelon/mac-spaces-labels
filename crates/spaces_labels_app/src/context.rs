@@ -6,7 +6,7 @@
 //! desktop for later use (e.g. naming desktops with a local model).
 
 use crate::engine::{debug_enabled, Engine, Msg};
-use crate::model::{display_name, space_name, with_vision};
+use crate::model::{space_name, with_vision};
 use app_context::Collector;
 use serde_json::json;
 use std::path::PathBuf;
@@ -82,7 +82,7 @@ pub fn save(engine: &Engine, out: &PathBuf) {
           "space_uuid": space.uuid,
           "display": display.uuid,
           "desktop": space_name(space),
-          "name": display_name(space, &model.names).0,
+          "name": model.title_for(space),
           "names": model.names.get(&space.uuid),
           "projects": contexts.get(&space.id).map(|c| &c.projects),
           "apps": contexts

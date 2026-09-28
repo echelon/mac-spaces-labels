@@ -7,24 +7,25 @@
 const { invoke } = window.__TAURI__.core;
 const currentWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
 
-const MAX_APPS = 8;
+const MAX_CHIPS = 7;
 const MAX_TABS = 40;
-const label = document.getElementById("label");
-const nameEl = document.getElementById("name");
-const appsEl = document.getElementById("apps");
-const detailsEl = document.getElementById("details");
-const moreEl = document.getElementById("more");
-const focusEl = document.getElementById("focus");
-const desktopEl = document.getElementById("desktop");
-const summaryEl = document.getElementById("summary");
-const renameOpen = document.getElementById("rename-open");
-const renameForm = document.getElementById("rename");
-const renameName = document.getElementById("rename-name");
-const renameDesc = document.getElementById("rename-desc");
-let editing = false;
+const $ = (id) => document.getElementById(id);
+const label = $("label");
+const eyebrowEl = $("eyebrow");
+const nameEl = $("name");
+const subtitleEl = $("subtitle");
+const summaryEl = $("summary");
+const chipsEl = $("chips");
+const detailsEl = $("details");
+const moreEl = $("more");
+const renameOpen = $("rename-open");
+const renameForm = $("rename");
+const renameName = $("rename-name");
+const renameDesc = $("rename-desc");
 
 let state = null;
 let expanded = false;
+let editing = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -33,24 +34,74 @@ function el(tag, className, text) {
   return node;
 }
 
-function renderApps() {
-  const shown = state.apps.slice(0, MAX_APPS);
-  const rows = shown.map((name) => el("li", null, name));
-  const hiddenCount = state.apps.length - shown.length;
-  if (hiddenCount > 0) rows.push(el("li", "more-apps", `+${hiddenCount} more`));
-  appsEl.replaceChildren(...rows);
-  appsEl.hidden = expanded || !state.show_apps || rows.length === 0;
+// Agents have no app icon; draw simple marks for them.
+const SVG = "http://www.w3.org/2000/svg";
+const AGENT_ICONS = {
+  // A radiating burst.
+  claude: (svg) => {
+    for (let i = 0; i < 8; i += 1) {
+      const ray = document.createElementNS(SVG, "rect");
+      ray.setAttribute("x", "10.8");
+      ray.setAttribute("y", "2");
+      ray.setAttribute("width", "2.4");
+      ray.setAttribute("height", "9");
+      ray.setAttribute("rx", "1.2");
+      ray.setAttribute("fill", "#e07a52");
+      ray.setAttribute("transform", `rotate(${i * 45} 12 12)`);
+      svg.append(ray);
+    }
+  },
+  // A prompt ">_" in a rounded square.
+  codex: (svg) => {
+    const box = document.createElementNS(SVG, "rect");
+    box.setAttribute("x", "2");
+    box.setAttribute("y", "2");
+    box.setAttribute("width", "20");
+    box.setAttribute("height", "20");
+    box.setAttribute("rx", "6");
+    box.setAttribute("fill", "#f1f3f5");
+    const prompt = document.createElementNS(SVG, "path");
+    prompt.setAttribute("d", "M7 8l4 4-4 4M12.5 16.5h4.5");
+    prompt.setAttribute("stroke", "#111");
+    prompt.setAttribute("stroke-width", "2");
+    prompt.setAttribute("fill", "none");
+    prompt.setAttribute("stroke-linecap", "round");
+    prompt.setAttribute("stroke-linejoin", "round");
+    svg.append(box, prompt);
+  },
+};
+
+function chipIcon(chip) {
+  if (chip.agent && AGENT_ICONS[chip.agent]) {
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "icon");
+    AGENT_ICONS[chip.agent](svg);
+    return svg;
+  }
+  const url = state.icons[chip.label];
+  if (!url) return el("span", "icon placeholder");
+  const img = el("img", "icon");
+  img.src = url;
+  img.alt = "";
+  return img;
 }
 
-// "artcraft · Claude working · dev site :4201": what this desktop is for.
-function projectLine(project) {
-  return [project.name, ...project.signals.slice(0, 2)].join(" · ");
-}
-
-function renderFocus() {
-  const projects = state.context ? state.context.projects : [];
-  focusEl.textContent = projects.slice(0, 2).map(projectLine).join("   ");
-  focusEl.hidden = expanded || projects.length === 0;
+function renderChips() {
+  // Before the first context pass, show plain app names.
+  const chips = state.chips.length
+    ? state.chips
+    : state.apps.map((name) => ({ label: name, category: "other", agent: null, state: null }));
+  const shown = chips.slice(0, MAX_CHIPS);
+  const rows = shown.map((chip) => {
+    const li = el("li", `chip cat-${chip.category}${chip.state ? ` agent-${chip.state}` : ""}`);
+    li.append(chipIcon(chip), el("span", "chip-label", chip.label));
+    if (chip.state) li.append(el("span", "chip-state", chip.state));
+    return li;
+  });
+  if (chips.length > shown.length) rows.push(el("li", "chip chip-more", `+${chips.length - shown.length}`));
+  chipsEl.replaceChildren(...rows);
+  chipsEl.hidden = expanded || !state.show_apps || rows.length === 0;
 }
 
 function statusClass(status) {
@@ -93,20 +144,19 @@ function renderDetails() {
     section.append(list);
     nodes.push(section);
   }
-  if (!context) {
-    nodes.push(el("p", "hint", "Gathering details…"));
-  } else if (!context.apps.length) {
-    nodes.push(el("p", "hint", "No windows on this desktop."));
-  }
+  if (!context) nodes.push(el("p", "hint", "Gathering details…"));
+  else if (!context.apps.length) nodes.push(el("p", "hint", "No windows on this desktop."));
+  const categories = Object.fromEntries(state.chips.map((c) => [c.label, c.category]));
   for (const app of context ? context.apps : []) {
-    const section = el("section", "app");
-    section.append(el("h2", null, app.name));
+    const section = el("section", `app cat-${categories[app.name] || "other"}`);
+    const heading = el("h2");
+    if (state.icons[app.name]) heading.append(chipIcon({ label: app.name }));
+    heading.append(document.createTextNode(app.name));
+    section.append(heading);
     app.windows.forEach((win, i) => {
       // Several windows need a divider even when titles are unreadable.
       const title = win.title || (app.windows.length > 1 ? `Window ${i + 1}` : null);
-      if (title && (app.windows.length > 1 || !win.tabs.length)) {
-        section.append(el("div", "window-title", title));
-      }
+      if (title && (app.windows.length > 1 || !win.tabs.length)) section.append(el("div", "window-title", title));
       if (win.vision) section.append(el("div", "vision", `👁 ${win.vision}`));
       if (!win.tabs.length) return;
       const list = el("ul", "tabs");
@@ -120,26 +170,52 @@ function renderDetails() {
   detailsEl.hidden = !expanded;
 }
 
+// The title must always fit on one line: shrink it (binary search on the
+// font size) down to 40% of the placement's size; only a title that still
+// does not fit wraps, and it is never cut off with an ellipsis.
+function fitTitle() {
+  const max = parseFloat(getComputedStyle(label).getPropertyValue("--title-max")) || 34;
+  const fits = (size) => {
+    nameEl.style.fontSize = `${size}px`;
+    return nameEl.scrollWidth <= nameEl.clientWidth + 1;
+  };
+  nameEl.classList.remove("wrap");
+  if (fits(max)) return;
+  let lo = Math.floor(max * 0.4);
+  let hi = max;
+  if (!fits(lo)) {
+    nameEl.classList.add("wrap");
+    nameEl.style.fontSize = `${lo}px`;
+    return;
+  }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  nameEl.style.fontSize = `${lo}px`;
+}
+
 function render(next) {
   if (next) state = next;
   if (!state) return;
   document.body.className = state.placement + (expanded ? " expanded" : "");
   document.documentElement.style.setProperty("--accent", state.color);
+  eyebrowEl.textContent = state.name_source === "user" ? `${state.desktop} · your name` : state.desktop;
   nameEl.textContent = state.name;
-  const source = { user: "your name", ai: "named by AI" }[state.name_source];
-  desktopEl.textContent = source ? `${state.desktop} · ${source}` : "";
-  desktopEl.hidden = !source;
+  subtitleEl.textContent = state.subtitle || "";
+  subtitleEl.hidden = !state.subtitle || editing;
   const summary = state.user_description || state.ai_summary;
   summaryEl.textContent = summary || "";
-  summaryEl.hidden = !expanded || !summary || editing;
+  summaryEl.hidden = !expanded || !summary || editing || summary === state.subtitle;
   renameOpen.hidden = !expanded || editing;
   renameForm.hidden = !editing;
-  renderApps();
-  renderFocus();
+  renderChips();
   if (expanded) renderDetails();
   else detailsEl.hidden = true;
   moreEl.textContent = expanded ? "less ▴" : "more ▾";
   label.hidden = false;
+  fitTitle();
   reportHitRect();
 }
 
@@ -161,9 +237,9 @@ function reportHitRect() {
 function openRename() {
   editing = true;
   renameName.value = state.name_source === "user" ? state.name : "";
-  renameName.placeholder = state.ai_name || state.desktop;
+  renameName.placeholder = state.name;
   renameDesc.value = state.user_description || "";
-  renameDesc.placeholder = state.ai_summary || "e.g. Shipping the ArtCraft video models";
+  renameDesc.placeholder = state.subtitle || state.ai_summary || "e.g. Shipping the ArtCraft video models";
   render();
   invoke("set_editing", { editing: true }).then(() => renameName.focus());
 }
@@ -174,7 +250,7 @@ function closeRename() {
   invoke("set_editing", { editing: false });
 }
 
-// An empty name hands the desktop back to the automatic (AI) name.
+// An empty name hands the desktop back to the automatic name.
 function saveRename(name) {
   editing = false;
   render();
@@ -182,8 +258,8 @@ function saveRename(name) {
 }
 
 renameOpen.addEventListener("click", openRename);
-document.getElementById("rename-cancel").addEventListener("click", closeRename);
-document.getElementById("rename-reset").addEventListener("click", () => saveRename(""));
+$("rename-cancel").addEventListener("click", closeRename);
+$("rename-reset").addEventListener("click", () => saveRename(""));
 renameForm.addEventListener("submit", (event) => {
   event.preventDefault();
   saveRename(renameName.value);
@@ -200,7 +276,9 @@ moreEl.addEventListener("click", () => {
   invoke("set_expanded", { expanded });
 });
 
-new ResizeObserver(reportHitRect).observe(label);
-window.addEventListener("resize", reportHitRect);
+new ResizeObserver(() => {
+  fitTitle();
+  reportHitRect();
+}).observe(document.body);
 currentWindow.listen("overlay-state", (event) => render(event.payload));
 invoke("overlay_state").then(render);
