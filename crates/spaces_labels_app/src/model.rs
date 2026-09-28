@@ -5,28 +5,57 @@ use spaces_sys::{AppsBySpace, Snapshot, Space, SpaceId, SpaceKind};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Corner {
+pub enum Placement {
   TopLeft,
   TopRight,
   BottomLeft,
   #[default]
   BottomRight,
+  /// Dead center of the screen.
+  Center,
+  /// Dead center, at poster size.
+  CenterBig,
+  /// Centered horizontally, vertically centered on the top quarter line:
+  /// where the eye lands mid-switch, like a website's hero section.
+  Hero,
 }
 
-impl Corner {
-  pub const ALL: [(Corner, &'static str); 4] = [
-    (Corner::TopLeft, "Top left"),
-    (Corner::TopRight, "Top right"),
-    (Corner::BottomLeft, "Bottom left"),
-    (Corner::BottomRight, "Bottom right"),
+impl Placement {
+  pub const CORNERS: [(Placement, &'static str); 4] = [
+    (Placement::TopLeft, "Top left"),
+    (Placement::TopRight, "Top right"),
+    (Placement::BottomLeft, "Bottom left"),
+    (Placement::BottomRight, "Bottom right"),
   ];
+  pub const CENTERED: [(Placement, &'static str); 3] = [
+    (Placement::Center, "Center"),
+    (Placement::CenterBig, "Center (big)"),
+    (Placement::Hero, "Hero (upper center)"),
+  ];
+
+  pub fn all() -> impl Iterator<Item = (Placement, &'static str)> {
+    Self::CORNERS.into_iter().chain(Self::CENTERED)
+  }
 
   pub fn id(self) -> &'static str {
     match self {
-      Corner::TopLeft => "corner:top_left",
-      Corner::TopRight => "corner:top_right",
-      Corner::BottomLeft => "corner:bottom_left",
-      Corner::BottomRight => "corner:bottom_right",
+      Placement::TopLeft => "placement:top_left",
+      Placement::TopRight => "placement:top_right",
+      Placement::BottomLeft => "placement:bottom_left",
+      Placement::BottomRight => "placement:bottom_right",
+      Placement::Center => "placement:center",
+      Placement::CenterBig => "placement:center_big",
+      Placement::Hero => "placement:hero",
+    }
+  }
+
+  /// Overlay window size (points). Centered placements get room for bigger
+  /// type; the page centers its content inside.
+  pub fn window_size(self) -> (f64, f64) {
+    match self {
+      Placement::CenterBig => (1200.0, 720.0),
+      Placement::Center | Placement::Hero => (720.0, 420.0),
+      _ => (480.0, 360.0),
     }
   }
 }
@@ -37,7 +66,7 @@ pub struct OverlayState {
   pub name: String,
   pub color: &'static str,
   pub apps: Vec<String>,
-  pub corner: Corner,
+  pub placement: Placement,
   pub show_apps: bool,
 }
 
@@ -60,7 +89,7 @@ pub fn overlay_state(
   snapshot: &Snapshot,
   apps: &AppsBySpace,
   space_id: SpaceId,
-  corner: Corner,
+  placement: Placement,
   show_apps: bool,
 ) -> Option<OverlayState> {
   let (_, space) = snapshot.space(space_id)?;
@@ -74,7 +103,7 @@ pub fn overlay_state(
     name: space_name(space),
     color,
     apps,
-    corner,
+    placement,
     show_apps,
   })
 }

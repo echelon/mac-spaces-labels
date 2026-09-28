@@ -10,7 +10,7 @@ const appsEl = document.getElementById("apps");
 
 function render(state) {
   if (!state) return;
-  document.body.className = state.corner;
+  document.body.className = state.placement;
   document.documentElement.style.setProperty("--accent", state.color);
   nameEl.textContent = state.name;
 

@@ -1,4 +1,4 @@
-use crate::model::Corner;
+use crate::model::Placement;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -7,14 +7,16 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-  pub corner: Corner,
+  /// Read `corner` too, from settings saved before centered placements.
+  #[serde(alias = "corner")]
+  pub placement: Placement,
   pub show_apps: bool,
 }
 
 impl Default for Settings {
   fn default() -> Self {
     Self {
-      corner: Corner::default(),
+      placement: Placement::default(),
       show_apps: true,
     }
   }

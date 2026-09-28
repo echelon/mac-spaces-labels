@@ -12,6 +12,8 @@ build:          ## release .app in target/release/bundle/macos
 
 install: build  ## replace /Applications/Spaces Labels.app and launch it
 	-pkill -x spaces-labels-app
+	@# LaunchServices refuses to open an app that is still shutting down (-600).
+	@while pgrep -x spaces-labels-app >/dev/null; do sleep 0.2; done
 	rm -rf "/Applications/Spaces Labels.app"
 	cp -R "$(APP)" /Applications/
 	open "/Applications/Spaces Labels.app"

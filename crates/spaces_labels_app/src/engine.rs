@@ -90,7 +90,13 @@ impl Engine {
     let model = self.model.lock().unwrap();
     let (space, _) = model.overlays.iter().find(|(_, o)| o.label == label)?;
     let s = &model.settings;
-    model::overlay_state(&model.snapshot, &model.apps, *space, s.corner, s.show_apps)
+    model::overlay_state(
+      &model.snapshot,
+      &model.apps,
+      *space,
+      s.placement,
+      s.show_apps,
+    )
   }
 
   pub fn update_settings(&self, change: impl FnOnce(&mut Settings)) {
@@ -222,7 +228,7 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   }
   model.snapshot = snapshot;
   model.apps = apps;
-  let corner = model.settings.corner;
+  let placement = model.settings.placement;
   let relayout_targets: Vec<(String, String)> = if relayout {
     model
       .overlays
@@ -241,10 +247,10 @@ fn reconcile(app: &AppHandle, relayout: bool) {
     overlay::close(app, &label);
   }
   for (label, display) in relayout_targets {
-    overlay::reposition(app, &label, &display, corner);
+    overlay::reposition(app, &label, &display, placement);
   }
   for Pending { space, display } in to_create {
-    let created = overlay::create(app, spaces, &display, corner, space);
+    let created = overlay::create(app, spaces, &display, placement, space);
     let mut model = engine.model.lock().unwrap();
     match created {
       Some(created) => {
@@ -279,10 +285,10 @@ fn push_states(app: &AppHandle, engine: &Engine) {
   {
     let mut model = engine.model.lock().unwrap();
     let model = &mut *model;
-    let (corner, show_apps) = (model.settings.corner, model.settings.show_apps);
+    let (placement, show_apps) = (model.settings.placement, model.settings.show_apps);
     for (space, overlay) in model.overlays.iter_mut() {
       let Some(state) =
-        model::overlay_state(&model.snapshot, &model.apps, *space, corner, show_apps)
+        model::overlay_state(&model.snapshot, &model.apps, *space, placement, show_apps)
       else {
         continue;
       };

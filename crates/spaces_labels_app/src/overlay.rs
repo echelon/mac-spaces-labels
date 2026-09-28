@@ -7,15 +7,15 @@
 //! latency is zero. A single all-Spaces window would instead show the previous
 //! label until the switch was noticed and the webview repainted.
 
-use crate::model::Corner;
+use crate::model::Placement;
 use spaces_sys::{SpaceId, Spaces};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
-use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+  AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
-pub const WIDTH: f64 = 480.0;
-pub const HEIGHT: f64 = 360.0;
 const MARGIN: f64 = 12.0;
 
 pub struct Created {
@@ -32,16 +32,16 @@ pub fn create(
   app: &AppHandle,
   spaces: Spaces,
   display: &str,
-  corner: Corner,
+  placement: Placement,
   space: SpaceId,
 ) -> Option<Created> {
   // Labels are never reused so a closing window cannot collide with its
   // replacement.
   let label = format!("space-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
-  let position = position_for(app, display, corner)?;
+  let (position, (width, height)) = frame_for(app, display, placement)?;
   let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
     .title("Spaces Labels")
-    .inner_size(WIDTH, HEIGHT)
+    .inner_size(width, height)
     .position(position.x, position.y)
     .decorations(false)
     .transparent(true)
@@ -71,11 +71,12 @@ pub fn create(
   }
 }
 
-pub fn reposition(app: &AppHandle, label: &str, display: &str, corner: Corner) {
-  if let (Some(window), Some(position)) = (
+pub fn reposition(app: &AppHandle, label: &str, display: &str, placement: Placement) {
+  if let (Some(window), Some((position, (width, height)))) = (
     app.get_webview_window(label),
-    position_for(app, display, corner),
+    frame_for(app, display, placement),
   ) {
+    let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(position);
   }
 }
@@ -86,9 +87,13 @@ pub fn close(app: &AppHandle, label: &str) {
   }
 }
 
-/// The overlay's top-left corner inside the display's usable area (below the
-/// menu bar, beside the Dock).
-fn position_for(app: &AppHandle, display: &str, corner: Corner) -> Option<LogicalPosition<f64>> {
+/// The overlay's top-left corner and size inside the display's usable area
+/// (below the menu bar, beside the Dock).
+fn frame_for(
+  app: &AppHandle,
+  display: &str,
+  placement: Placement,
+) -> Option<(LogicalPosition<f64>, (f64, f64))> {
   let bounds = spaces_sys::display_bounds(display)?;
   let monitors = app.available_monitors().unwrap_or_default();
   let monitor = monitors.iter().find(|m| {
@@ -109,16 +114,24 @@ fn position_for(app: &AppHandle, display: &str, corner: Corner) -> Option<Logica
       bounds.height - 24.0,
     ),
   };
+  // Never larger than the usable area (small or scaled displays).
+  let (w, h) = placement.window_size();
+  let (w, h) = (w.min(width - 2.0 * MARGIN), h.min(height - 2.0 * MARGIN));
   let left = x + MARGIN;
-  let right = x + width - WIDTH - MARGIN;
+  let right = x + width - w - MARGIN;
   let top = y + MARGIN;
-  let bottom = y + height - HEIGHT - MARGIN;
-  Some(match corner {
-    Corner::TopLeft => LogicalPosition::new(left, top),
-    Corner::TopRight => LogicalPosition::new(right, top),
-    Corner::BottomLeft => LogicalPosition::new(left, bottom),
-    Corner::BottomRight => LogicalPosition::new(right, bottom),
-  })
+  let bottom = y + height - h - MARGIN;
+  let center_x = x + (width - w) / 2.0;
+  let center_y = y + (height - h) / 2.0;
+  let position = match placement {
+    Placement::TopLeft => LogicalPosition::new(left, top),
+    Placement::TopRight => LogicalPosition::new(right, top),
+    Placement::BottomLeft => LogicalPosition::new(left, bottom),
+    Placement::BottomRight => LogicalPosition::new(right, bottom),
+    Placement::Center | Placement::CenterBig => LogicalPosition::new(center_x, center_y),
+    Placement::Hero => LogicalPosition::new(center_x, (y + height / 4.0 - h / 2.0).max(top)),
+  };
+  Some((position, (w, h)))
 }
 
 /// WebKit stops rendering webviews in occluded windows. Our overlays spend

@@ -8,7 +8,7 @@ mod overlay;
 mod settings;
 
 use engine::{Engine, TRAY_ID};
-use model::{Corner, OverlayState};
+use model::{OverlayState, Placement};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, RunEvent, State, WebviewWindow, Wry};
@@ -20,22 +20,35 @@ fn overlay_state(window: WebviewWindow, engine: State<Engine>) -> Option<Overlay
 
 fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
   let settings = engine.model.lock().unwrap().settings.clone();
-  let corners: Vec<CheckMenuItem<Wry>> = Corner::ALL
-    .iter()
-    .map(|(corner, name)| {
-      CheckMenuItem::with_id(
-        app,
-        corner.id(),
-        *name,
-        true,
-        *corner == settings.corner,
-        None::<&str>,
-      )
-    })
+  let check = |(placement, name): (Placement, &str)| {
+    CheckMenuItem::with_id(
+      app,
+      placement.id(),
+      name,
+      true,
+      placement == settings.placement,
+      None::<&str>,
+    )
+  };
+  let corners: Vec<CheckMenuItem<Wry>> = Placement::CORNERS
+    .into_iter()
+    .map(check)
     .collect::<Result<_, _>>()?;
-  let corner_refs: Vec<&dyn tauri::menu::IsMenuItem<Wry>> =
+  let centered: Vec<CheckMenuItem<Wry>> = Placement::CENTERED
+    .into_iter()
+    .map(check)
+    .collect::<Result<_, _>>()?;
+  let separator = PredefinedMenuItem::separator(app)?;
+  let mut position_items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> =
     corners.iter().map(|c| c as _).collect();
-  let position = Submenu::with_items(app, "Label position", true, &corner_refs)?;
+  position_items.push(&separator);
+  position_items.extend(
+    centered
+      .iter()
+      .map(|c| c as &dyn tauri::menu::IsMenuItem<Wry>),
+  );
+  let position = Submenu::with_items(app, "Label position", true, &position_items)?;
+  let placement_items: Vec<CheckMenuItem<Wry>> = corners.into_iter().chain(centered).collect();
   let show_apps = CheckMenuItem::with_id(
     app,
     "show_apps",
@@ -70,9 +83,9 @@ fn build_tray(app: &tauri::App, engine: &Engine) -> tauri::Result<()> {
         "quit" => app.exit(0),
         "show_apps" => engine.update_settings(|s| s.show_apps = !s.show_apps),
         id => {
-          if let Some((corner, _)) = Corner::ALL.iter().find(|(c, _)| c.id() == id) {
-            engine.update_settings(|s| s.corner = *corner);
-            for item in &corners {
+          if let Some((placement, _)) = Placement::all().find(|(p, _)| p.id() == id) {
+            engine.update_settings(|s| s.placement = placement);
+            for item in &placement_items {
               let _ = item.set_checked(item.id().as_ref() == id);
             }
           }
