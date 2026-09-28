@@ -32,6 +32,17 @@ Each desktop also gets a **projects** list (the repository roots its agents,
 terminals, dev sites and IDE windows point at, most active first), shown under
 the app list, e.g. "artcraft · Claude working · dev site :4201".
 
+**Naming.** The same local model names each desktop from a compact digest of
+all of the above (`naming.rs`). When a project is known the name is
+"<project>: <task>" and the model only writes the task (small models otherwise
+drift to app names or the agent's latest step); otherwise it names the topic.
+Names are cached by desktop UUID in `names.json` and are sticky: a new desktop
+is named at once, a changed project set renames it (at most every 30 s), and
+anything else only after 10 minutes. **✎ Rename** in the expanded panel sets
+your own name and description, which win over the model's; each rename is
+appended to `feedback.jsonl` with the exact model input and the model's
+suggestion, as eval data.
+
 The VLM is optional (menu bar → Describe windows with local AI). Put
 `Qwen3VL-2B-Instruct-Q8_0.gguf` and `mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf`
 (from `Qwen/Qwen3-VL-2B-Instruct-GGUF`) in
@@ -46,8 +57,12 @@ Browser windows are matched to WindowServer windows by bounds, so tabs work
 without Screen Recording. The latest context of every desktop is written to
 `~/Library/Application Support/io.echelon.spaces-labels/context.json`.
 
-The build is ad-hoc signed, so macOS treats each rebuild as a new app and
-permissions have to be granted again after `make install`.
+Builds are signed with a local self-signed identity, "Spaces Labels Dev"
+(`bundle.macOS.signingIdentity`), so macOS keeps Screen Recording and
+Automation grants across rebuilds. On another machine, create one (Keychain
+Access → Certificate Assistant → Create a Certificate, type Code Signing) or
+remove `signingIdentity` to fall back to ad-hoc signing, which loses the
+grants on every rebuild.
 
 ## How it stays instant
 

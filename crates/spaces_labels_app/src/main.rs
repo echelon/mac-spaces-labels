@@ -7,6 +7,7 @@
 mod context;
 mod engine;
 mod model;
+mod naming;
 mod overlay;
 mod settings;
 mod vision;
@@ -31,6 +32,22 @@ fn set_expanded(window: WebviewWindow, engine: State<Engine>, expanded: bool) {
 #[tauri::command]
 fn set_hit_rect(window: WebviewWindow, engine: State<Engine>, rect: Option<overlay::Frame>) {
   engine.set_hit_rect(window.label(), rect);
+}
+
+#[tauri::command]
+fn rename_space(window: WebviewWindow, engine: State<Engine>, name: String, description: String) {
+  engine.rename(window.app_handle(), window.label(), &name, &description);
+}
+
+/// Typing needs keyboard focus, which an overlay never takes on its own:
+/// take it while the rename form is open and hand it back afterwards.
+#[tauri::command]
+fn set_editing(window: WebviewWindow, editing: bool) {
+  if editing {
+    let _ = window.set_focus();
+  } else {
+    engine::restore_focus(window.app_handle());
+  }
 }
 
 const SCREEN_RECORDING_SETTINGS: &str =
@@ -140,13 +157,16 @@ fn main() {
     .invoke_handler(tauri::generate_handler![
       overlay_state,
       set_expanded,
-      set_hit_rect
+      set_hit_rect,
+      rename_space,
+      set_editing
     ])
     .setup(|app| {
       #[cfg(target_os = "macos")]
       app.set_activation_policy(tauri::ActivationPolicy::Accessory);
       let config_dir = app.path().app_config_dir()?;
-      let (engine, rx, context_rx) = Engine::new(config_dir.join("settings.json"));
+      let _ = std::fs::create_dir_all(&config_dir);
+      let (engine, rx, context_rx) = Engine::new(config_dir.clone());
       let titles_missing = !spaces_sys::can_read_titles();
       if titles_missing {
         // Shows the system prompt the first time; afterwards the menu item

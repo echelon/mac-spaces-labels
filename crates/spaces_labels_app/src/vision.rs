@@ -1,4 +1,6 @@
-//! Local vision-model descriptions of windows ("what is this window doing").
+//! The local model: vision-model descriptions of windows ("what is this
+//! window doing") and, with the same model and server, desktop names (see
+//! `naming`).
 //!
 //! A llama.cpp server (Homebrew `llama-server`, Metal) runs as a child
 //! process bound to 127.0.0.1 with a small VLM (Qwen3-VL-2B). Nothing leaves
@@ -16,9 +18,11 @@
 //! other Spaces) downscaled by `sips`, then are deleted.
 
 use crate::engine::{debug_enabled, Engine, Msg};
+use crate::naming;
 use app_context::WindowContext;
 use serde::Serialize;
 use spaces_sys::SpaceId;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -26,8 +30,38 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-pub const MODEL: &str = "Qwen3VL-2B-Instruct-Q8_0.gguf";
-pub const PROJECTOR: &str = "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf";
+/// Vision-language models (weights, vision projector) for screenshots, in
+/// order of preference. The 2B is preferred: screenshots are frequent, it is
+/// twice as fast (1.0–1.6 s vs 2.1–2.4 s on an M4 Pro) and good enough; the
+/// 4B describes more precisely if it is the one installed.
+pub const VISION_MODELS: [(&str, &str); 2] = [
+  (
+    "Qwen3VL-2B-Instruct-Q8_0.gguf",
+    "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf",
+  ),
+  (
+    "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+    "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+  ),
+];
+
+/// Text model for desktop names: rare and shown on screen, so quality wins.
+/// Qwen3-4B-Instruct named desktops clearly better than either VL model.
+/// Without it, names come from the vision model.
+pub const TEXT_MODELS: [&str; 1] = ["Qwen3-4B-Instruct-2507-Q4_K_M.gguf"];
+
+fn installed_vision_model(models: &Path) -> Option<(&'static str, &'static str)> {
+  VISION_MODELS
+    .into_iter()
+    .find(|(model, projector)| models.join(model).exists() && models.join(projector).exists())
+}
+
+fn installed_text_model(models: &Path) -> Option<&'static str> {
+  TEXT_MODELS
+    .into_iter()
+    .find(|model| models.join(model).exists())
+}
+
 /// Caps the vision tokens per screenshot: the main speed/quality lever.
 const MAX_IMAGE_TOKENS: u32 = 1024;
 /// Longest side of the screenshot sent to the model, in pixels.
@@ -82,6 +116,7 @@ pub fn start(app: &AppHandle) {
 struct Server {
   child: Child,
   port: u16,
+  model: &'static str,
   last_used: Instant,
 }
 
@@ -95,83 +130,148 @@ impl Drop for Server {
 
 fn run(app: AppHandle) {
   let engine = app.state::<Engine>();
-  let Some(models) = models_dir(&app) else {
+  let (Some(models), Ok(config)) = (models_dir(&app), app.path().app_config_dir()) else {
     return;
   };
   let scratch = std::env::temp_dir().join(format!("spaces-labels-{}", std::process::id()));
   let _ = std::fs::create_dir_all(&scratch);
-  let mut server: Option<Server> = None;
+  let mut vision_server: Option<Server> = None;
+  let mut text_server: Option<Server> = None;
+  let mut naming_attempts: HashMap<SpaceId, Instant> = HashMap::new();
   loop {
     std::thread::sleep(Duration::from_secs(1));
     let blocked = blocked_reason(&engine, &models);
     set_status(&engine, blocked.clone());
     if blocked.is_some() {
-      server = None;
+      (vision_server, text_server) = (None, None);
       continue;
     }
-    let Some(target) = next_window(&engine) else {
+    for server in [&mut vision_server, &mut text_server] {
       if server
         .as_ref()
         .is_some_and(|s| s.last_used.elapsed() > IDLE_SHUTDOWN)
       {
-        server = None;
+        *server = None;
+      }
+    }
+    // Naming is cheap (about a second, text only) and what the overlays
+    // show, so it goes first; screenshots (Screen Recording) fill the gaps.
+    if let Some(job) = naming::next_job(&engine, &naming_attempts) {
+      let text_model = installed_text_model(&models);
+      let slot = if text_model.is_some() {
+        &mut text_server
+      } else {
+        &mut vision_server
+      };
+      let weights = text_model.map(|m| (m, None));
+      if let Some(server) = ensure(&engine, &models, slot, weights) {
+        name_space(
+          &engine,
+          &config,
+          server.port,
+          server.model,
+          job,
+          &mut naming_attempts,
+        );
+        server.last_used = Instant::now();
+        std::thread::sleep(COOLDOWN);
       }
       continue;
-    };
-    if server.is_none() {
-      match start_server(&models) {
-        Ok(started) => server = Some(started),
-        Err(e) => {
-          set_status(&engine, Some(format!("model server failed: {e}")));
-          std::thread::sleep(Duration::from_secs(30));
-          continue;
-        }
+    }
+    if !spaces_sys::can_read_titles() {
+      continue;
+    }
+    if let Some(target) = next_window(&engine) {
+      if let Some(server) = ensure(&engine, &models, &mut vision_server, None) {
+        describe_window(&engine, &scratch, server.port, target);
+        server.last_used = Instant::now();
+        std::thread::sleep(COOLDOWN);
       }
     }
-    let port = server.as_ref().unwrap().port;
-    let started = Instant::now();
-    let result = capture(target.id, &scratch).and_then(|jpeg| describe(port, &target, &jpeg));
-    let seconds = started.elapsed().as_secs_f32();
-    if let Some(s) = server.as_mut() {
-      s.last_used = Instant::now();
-    }
-    match result {
-      Ok(text) => {
-        if debug_enabled() {
-          eprintln!(
-            "[vision] {} {:?} ({seconds:.2}s): {text}",
-            target.app, target.title
-          );
-        }
-        engine.model.lock().unwrap().vision.insert(
-          target.id,
-          VisionNote {
-            text,
-            title: target.title.clone(),
-            at: Some(Instant::now()),
-            seconds,
-          },
-        );
-        engine.send(Msg::Push);
-      }
-      Err(e) => {
-        if debug_enabled() {
-          eprintln!("[vision] {} failed: {e}", target.app);
-        }
-        // Remember the failure too, so one bad window cannot hog the loop.
-        engine.model.lock().unwrap().vision.insert(
-          target.id,
-          VisionNote {
-            text: format!("(no description: {e})"),
-            title: target.title.clone(),
-            at: Some(Instant::now()),
-            seconds,
-          },
-        );
-      }
-    }
-    std::thread::sleep(COOLDOWN);
   }
+}
+
+/// Starts the server in `slot` if needed: the given weights (and projector),
+/// or the preferred installed vision model. `None` (after reporting and
+/// backing off) if it will not start.
+fn ensure<'a>(
+  engine: &Engine,
+  models: &Path,
+  slot: &'a mut Option<Server>,
+  weights: Option<(&'static str, Option<&'static str>)>,
+) -> Option<&'a mut Server> {
+  if slot.is_none() {
+    let weights = weights.or_else(|| installed_vision_model(models).map(|(m, p)| (m, Some(p))))?;
+    match start_server(models, weights.0, weights.1) {
+      Ok(started) => *slot = Some(started),
+      Err(e) => {
+        set_status(engine, Some(format!("model server failed: {e}")));
+        std::thread::sleep(Duration::from_secs(30));
+        return None;
+      }
+    }
+  }
+  slot.as_mut()
+}
+
+fn name_space(
+  engine: &Engine,
+  config: &Path,
+  port: u16,
+  model_name: &str,
+  job: naming::Job,
+  attempts: &mut HashMap<SpaceId, Instant>,
+) {
+  attempts.insert(job.space, Instant::now());
+  let started = Instant::now();
+  let result = naming::name(port, &job.digest, job.project.as_deref());
+  let seconds = started.elapsed().as_secs_f32();
+  if debug_enabled() {
+    eprintln!("[naming] space {} ({seconds:.2}s): {result:?}", job.space);
+  }
+  let Ok((name, summary)) = result else {
+    return;
+  };
+  let mut model = engine.model.lock().unwrap();
+  model.names.entry(job.uuid).or_default().ai = Some(naming::AiName {
+    name,
+    summary,
+    model: model_name.into(),
+    at_unix: naming::now_unix(),
+    seconds,
+    input_hash: job.input_hash,
+    projects_hash: job.projects_hash,
+  });
+  naming::save(config, &model.names);
+  drop(model);
+  engine.send(Msg::Refresh);
+}
+
+fn describe_window(engine: &Engine, scratch: &Path, port: u16, target: Target) {
+  let started = Instant::now();
+  let result = capture(target.id, scratch).and_then(|jpeg| describe(port, &target, &jpeg));
+  let seconds = started.elapsed().as_secs_f32();
+  let text = match result {
+    Ok(text) => text,
+    // Remember failures too, so one bad window cannot hog the loop.
+    Err(e) => format!("(no description: {e})"),
+  };
+  if debug_enabled() {
+    eprintln!(
+      "[vision] {} {:?} ({seconds:.2}s): {text}",
+      target.app, target.title
+    );
+  }
+  engine.model.lock().unwrap().vision.insert(
+    target.id,
+    VisionNote {
+      text,
+      title: target.title.clone(),
+      at: Some(Instant::now()),
+      seconds,
+    },
+  );
+  engine.send(Msg::Push);
 }
 
 fn set_status(engine: &Engine, blocked: Option<String>) {
@@ -194,11 +294,8 @@ fn blocked_reason(engine: &Engine, models: &Path) -> Option<String> {
   if llama_server().is_none() {
     return Some("llama.cpp is not installed (brew install llama.cpp)".into());
   }
-  if !models.join(MODEL).exists() || !models.join(PROJECTOR).exists() {
+  if installed_vision_model(models).is_none() && installed_text_model(models).is_none() {
     return Some(format!("model not installed in {}", models.display()));
-  }
-  if !spaces_sys::can_read_titles() {
-    return Some("needs Screen Recording".into());
   }
   system_pressure()
 }
@@ -260,7 +357,11 @@ fn next_window(engine: &Engine) -> Option<Target> {
   })
 }
 
-fn start_server(models: &Path) -> Result<Server, String> {
+fn start_server(
+  models: &Path,
+  weights: &'static str,
+  projector: Option<&'static str>,
+) -> Result<Server, String> {
   let binary = llama_server().ok_or("llama-server not found")?;
   let port = TcpListener::bind("127.0.0.1:0")
     .and_then(|l| l.local_addr())
@@ -270,13 +371,18 @@ fn start_server(models: &Path) -> Result<Server, String> {
   // The shell is a watchdog: it stops llama-server when this app exits (even
   // if it crashes) or when the shell itself is killed.
   let script = format!(
-    "{binary} -m {model} --mmproj {projector} --host 127.0.0.1 --port {port} \
+    "{binary} -m {model} {vision} --host 127.0.0.1 --port {port} \
      --ctx-size 4096 --parallel 1 --threads 4 --prio -1 --no-webui \
-     --image-max-tokens {MAX_IMAGE_TOKENS} --reasoning off >/dev/null 2>&1 & S=$!; \
+     --reasoning off >/dev/null 2>&1 & S=$!; \
      trap 'kill $S 2>/dev/null' EXIT TERM; \
      while kill -0 {parent} 2>/dev/null && kill -0 $S 2>/dev/null; do sleep 2; done",
-    model = quote(&models.join(MODEL)),
-    projector = quote(&models.join(PROJECTOR)),
+    model = quote(&models.join(weights)),
+    vision = projector
+      .map(|p| format!(
+        "--mmproj {} --image-max-tokens {MAX_IMAGE_TOKENS}",
+        quote(&models.join(p))
+      ))
+      .unwrap_or_default(),
     parent = std::process::id(),
   );
   let child = Command::new("/bin/sh")
@@ -289,6 +395,7 @@ fn start_server(models: &Path) -> Result<Server, String> {
   let server = Server {
     child,
     port,
+    model: weights,
     last_used: Instant::now(),
   };
   let deadline = Instant::now() + Duration::from_secs(90);
@@ -362,7 +469,7 @@ fn describe(port: u16, target: &Target, jpeg: &[u8]) -> Result<String, String> {
 }
 
 /// Minimal HTTP/1.1 to the loopback model server (no client library needed).
-fn http(
+pub fn http(
   port: u16,
   method: &str,
   path: &str,

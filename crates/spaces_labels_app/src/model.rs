@@ -1,5 +1,6 @@
 //! What each overlay window shows, derived from the latest Spaces snapshot.
 
+use crate::naming::NameStore;
 use crate::vision::{VisionNote, VisionStatus};
 use app_context::SpaceContext;
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,15 @@ impl Placement {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct OverlayState {
   pub space_id: SpaceId,
+  /// Your name for the desktop, else the model's, else `desktop`.
   pub name: String,
+  /// "user", "ai" or "default".
+  pub name_source: &'static str,
+  /// Mission Control's name ("Desktop 3").
+  pub desktop: String,
+  pub ai_name: Option<String>,
+  pub ai_summary: Option<String>,
+  pub user_description: Option<String>,
   pub color: &'static str,
   pub apps: Vec<String>,
   pub placement: Placement,
@@ -97,6 +106,20 @@ pub struct Sources<'a> {
   pub show_apps: bool,
   pub vision: &'a HashMap<u32, VisionNote>,
   pub vision_status: &'a VisionStatus,
+  pub names: &'a NameStore,
+}
+
+/// What to call a desktop: your name, else the model's, else Mission
+/// Control's. Returns the name and where it came from.
+pub fn display_name(space: &Space, names: &NameStore) -> (String, &'static str) {
+  let entry = names.get(&space.uuid);
+  if let Some(user) = entry.and_then(|n| n.user.as_ref()) {
+    return (user.name.clone(), "user");
+  }
+  if let Some(ai) = entry.and_then(|n| n.ai.as_ref()) {
+    return (ai.name.clone(), "ai");
+  }
+  (space_name(space), "default")
 }
 
 /// Fills in the vision model's latest description of each window.
@@ -130,9 +153,19 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     .get(&space_id)
     .map(|list| list.iter().map(|a| a.name.clone()).collect())
     .unwrap_or_default();
+  let (name, name_source) = display_name(space, sources.names);
+  let entry = sources.names.get(&space.uuid);
   Some(OverlayState {
     space_id,
-    name: space_name(space),
+    name,
+    name_source,
+    desktop: space_name(space),
+    ai_name: entry.and_then(|n| n.ai.as_ref()).map(|a| a.name.clone()),
+    ai_summary: entry.and_then(|n| n.ai.as_ref()).map(|a| a.summary.clone()),
+    user_description: entry
+      .and_then(|n| n.user.as_ref())
+      .map(|u| u.description.clone())
+      .filter(|d| !d.is_empty()),
     color,
     apps,
     placement: sources.placement,

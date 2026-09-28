@@ -82,6 +82,8 @@ pub struct Model {
   /// Window number -> the vision model's latest description.
   pub vision: HashMap<u32, crate::vision::VisionNote>,
   pub vision_status: crate::vision::VisionStatus,
+  /// Desktop names (yours and the model's), by Space UUID.
+  pub names: crate::naming::NameStore,
 }
 
 impl Model {
@@ -95,6 +97,7 @@ impl Model {
       show_apps: self.settings.show_apps,
       vision: &self.vision,
       vision_status: &self.vision_status,
+      names: &self.names,
     }
   }
 
@@ -110,15 +113,19 @@ pub struct Engine {
   /// Pokes the context thread.
   pub context_tx: Mutex<Sender<()>>,
   pub settings_path: PathBuf,
+  /// App config directory: settings, names, context and feedback files.
+  pub config_dir: PathBuf,
 }
 
 impl Engine {
-  pub fn new(settings_path: PathBuf) -> (Self, Receiver<Msg>, Receiver<()>) {
+  pub fn new(config_dir: PathBuf) -> (Self, Receiver<Msg>, Receiver<()>) {
+    let settings_path = config_dir.join("settings.json");
     let (tx, rx) = mpsc::channel();
     let (context_tx, context_rx) = mpsc::channel();
     let settings = Settings::load(&settings_path);
     let model = Model {
       settings,
+      names: crate::naming::load(&config_dir),
       ..Default::default()
     };
     (
@@ -128,6 +135,7 @@ impl Engine {
         tx: Mutex::new(tx),
         context_tx: Mutex::new(context_tx),
         settings_path,
+        config_dir,
       },
       rx,
       context_rx,
@@ -169,6 +177,53 @@ impl Engine {
     self.send(Msg::Push);
   }
 
+  /// Names a desktop yourself (an empty name returns it to the model's), and
+  /// logs the rename with what the model saw and suggested, for evals.
+  pub fn rename(&self, app: &AppHandle, label: &str, name: &str, description: &str) {
+    let name = name.trim();
+    let record = {
+      let mut model = self.model.lock().unwrap();
+      let Some(space_id) = model
+        .overlays
+        .iter()
+        .find(|(_, o)| o.label == label)
+        .map(|(s, _)| *s)
+      else {
+        return;
+      };
+      let Some((_, space)) = model.snapshot.space(space_id) else {
+        return;
+      };
+      let (uuid, desktop) = (space.uuid.clone(), model::space_name(space));
+      let context = model
+        .contexts
+        .as_ref()
+        .and_then(|all| all.get(&space_id).cloned())
+        .map(|c| model::with_vision(c, &model.vision))
+        .unwrap_or_default();
+      let entry = model.names.entry(uuid.clone()).or_default();
+      let ai = entry.ai.clone();
+      entry.user = (!name.is_empty()).then(|| crate::naming::UserName {
+        name: name.to_string(),
+        description: description.trim().to_string(),
+        at_unix: crate::naming::now_unix(),
+      });
+      crate::naming::save(&self.config_dir, &model.names);
+      serde_json::json!({
+        "at_unix": crate::naming::now_unix(),
+        "space_uuid": uuid,
+        "desktop": desktop,
+        "input": crate::naming::digest(&context),
+        "ai": ai,
+        "user": (!name.is_empty()).then(|| serde_json::json!({"name": name, "description": description.trim()})),
+        "context": context,
+      })
+    };
+    crate::naming::record_feedback(&self.config_dir, &record);
+    restore_focus(app);
+    self.send(Msg::Refresh);
+  }
+
   pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>) {
     if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
       o.hit = hit;
@@ -182,6 +237,24 @@ impl Engine {
     drop(model);
     self.send(Msg::Relayout);
   }
+}
+
+/// Menu-bar text. macOS hides status items that do not fit (next to the
+/// notch, a long title makes the whole item vanish), so keep it short; the
+/// overlay shows the full name.
+fn tray_title(name: &str) -> String {
+  const MAX: usize = 18;
+  if name.chars().count() <= MAX {
+    return name.to_string();
+  }
+  let mut short: String = name
+    .chars()
+    .take(MAX - 1)
+    .collect::<String>()
+    .trim_end()
+    .to_string();
+  short.push('…');
+  short
 }
 
 pub fn debug_enabled() -> bool {
@@ -220,11 +293,11 @@ fn poll_loop(app: AppHandle) {
         model
           .snapshot
           .space(active)
-          .map(|(_, space)| model::space_name(space))
+          .map(|(_, space)| model::display_name(space, &model.names).0)
       };
       // Unknown Space (just created): the worker's snapshot will name it.
       if let (Some(title), Some(tray)) = (title, app.tray_by_id(TRAY_ID)) {
-        let _ = tray.set_title(Some(title));
+        let _ = tray.set_title(Some(tray_title(&title)));
       }
       engine.send(Msg::Refresh);
       if debug_enabled() {
@@ -308,7 +381,7 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   let mut model = engine.model.lock().unwrap();
   let active_title = snapshot
     .space(spaces.active_space())
-    .map(|(_, s)| model::space_name(s));
+    .map(|(_, s)| model::display_name(s, &model.names).0);
 
   // Drop overlays whose Space is gone, or whose window is not (only) on its
   // Space: a switch raced its creation, or the window was closed.
@@ -358,7 +431,7 @@ fn reconcile(app: &AppHandle, relayout: bool) {
   drop(model);
 
   if let (Some(title), Some(tray)) = (active_title, app.tray_by_id(TRAY_ID)) {
-    let _ = tray.set_title(Some(title));
+    let _ = tray.set_title(Some(tray_title(&title)));
   }
   for label in to_close {
     overlay::close(app, &label);
@@ -496,7 +569,7 @@ fn remember_front_app() {
 /// A click on an overlay activates this (accessory) app and takes focus from
 /// whatever the user was working in. Give it straight back.
 #[cfg(target_os = "macos")]
-fn restore_focus(app: &AppHandle) {
+pub fn restore_focus(app: &AppHandle) {
   let pid = LAST_FRONT_PID.load(Ordering::Relaxed);
   if pid == 0 {
     return;

@@ -281,3 +281,65 @@ body.center_big .focus, body.hero_big .focus { font-size: 24px; }
   color: #c5f6fa;
   background: rgba(21, 170, 191, 0.14);
 }
+
+/* Name row, source line and the rename form. */
+.head { display: flex; align-items: baseline; gap: 12px; max-width: 100%; min-width: 0; }
+body.top_right .head, body.bottom_right .head { justify-content: flex-end; }
+body.center .head, body.center_big .head, body.hero .head, body.hero_big .head { justify-content: center; }
+body.expanded .head { justify-content: space-between; }
+.head h1 { min-width: 0; }
+.sub {
+  margin: -2px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.sub[hidden], .summary[hidden], .rename[hidden], .link[hidden] { display: none; }
+body.center_big .sub, body.hero_big .sub { font-size: 16px; }
+.summary { margin: 2px 0 4px; font-size: 13px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); }
+.link {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.link:hover { background: rgba(255, 255, 255, 0.14); }
+
+.rename { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; font-size: 12px; color: var(--muted); }
+.rename label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.rename input, .rename textarea {
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.rename input { font-size: 20px; font-weight: 800; }
+.rename input:focus, .rename textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.rename .actions { display: flex; gap: 8px; }
+.rename button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rename button[type="submit"] { background: var(--accent); color: #111; }
+.rename .fine { margin: 0; font-size: 11px; font-weight: 500; opacity: 0.8; }

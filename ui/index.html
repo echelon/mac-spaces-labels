@@ -8,7 +8,22 @@
 </head>
 <body>
   <main id="label" class="label" hidden>
-    <h1 id="name"></h1>
+    <div class="head">
+      <h1 id="name"></h1>
+      <button id="rename-open" class="link" type="button" hidden>✎ Rename</button>
+    </div>
+    <p id="desktop" class="sub" hidden></p>
+    <p id="summary" class="summary" hidden></p>
+    <form id="rename" class="rename" hidden>
+      <label>Name <input id="rename-name" maxlength="40" autocomplete="off" spellcheck="false"></label>
+      <label>What is this desktop for? <textarea id="rename-desc" rows="2" maxlength="300"></textarea></label>
+      <div class="actions">
+        <button type="submit">Save</button>
+        <button id="rename-cancel" type="button">Cancel</button>
+        <button id="rename-reset" type="button">Use automatic name</button>
+      </div>
+      <p class="fine">Saved with this desktop's context and the AI's suggestion (feedback.jsonl) for evals.</p>
+    </form>
     <ul id="apps" class="apps"></ul>
     <p id="focus" class="focus" hidden></p>
     <div id="details" class="details" hidden></div>

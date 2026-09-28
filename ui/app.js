@@ -15,6 +15,13 @@ const appsEl = document.getElementById("apps");
 const detailsEl = document.getElementById("details");
 const moreEl = document.getElementById("more");
 const focusEl = document.getElementById("focus");
+const desktopEl = document.getElementById("desktop");
+const summaryEl = document.getElementById("summary");
+const renameOpen = document.getElementById("rename-open");
+const renameForm = document.getElementById("rename");
+const renameName = document.getElementById("rename-name");
+const renameDesc = document.getElementById("rename-desc");
+let editing = false;
 
 let state = null;
 let expanded = false;
@@ -119,6 +126,14 @@ function render(next) {
   document.body.className = state.placement + (expanded ? " expanded" : "");
   document.documentElement.style.setProperty("--accent", state.color);
   nameEl.textContent = state.name;
+  const source = { user: "your name", ai: "named by AI" }[state.name_source];
+  desktopEl.textContent = source ? `${state.desktop} · ${source}` : "";
+  desktopEl.hidden = !source;
+  const summary = state.user_description || state.ai_summary;
+  summaryEl.textContent = summary || "";
+  summaryEl.hidden = !expanded || !summary || editing;
+  renameOpen.hidden = !expanded || editing;
+  renameForm.hidden = !editing;
   renderApps();
   renderFocus();
   if (expanded) renderDetails();
@@ -143,7 +158,42 @@ function reportHitRect() {
   invoke("set_hit_rect", { rect });
 }
 
+function openRename() {
+  editing = true;
+  renameName.value = state.name_source === "user" ? state.name : "";
+  renameName.placeholder = state.ai_name || state.desktop;
+  renameDesc.value = state.user_description || "";
+  renameDesc.placeholder = state.ai_summary || "e.g. Shipping the ArtCraft video models";
+  render();
+  invoke("set_editing", { editing: true }).then(() => renameName.focus());
+}
+
+function closeRename() {
+  editing = false;
+  render();
+  invoke("set_editing", { editing: false });
+}
+
+// An empty name hands the desktop back to the automatic (AI) name.
+function saveRename(name) {
+  editing = false;
+  render();
+  invoke("rename_space", { name, description: renameDesc.value });
+}
+
+renameOpen.addEventListener("click", openRename);
+document.getElementById("rename-cancel").addEventListener("click", closeRename);
+document.getElementById("rename-reset").addEventListener("click", () => saveRename(""));
+renameForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveRename(renameName.value);
+});
+renameForm.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeRename();
+});
+
 moreEl.addEventListener("click", () => {
+  if (editing) closeRename();
   expanded = !expanded;
   render();
   detailsEl.scrollTop = 0;

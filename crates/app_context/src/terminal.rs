@@ -4,7 +4,6 @@
 use crate::osa;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::process::Command;
 use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -64,21 +63,11 @@ pub struct TmuxWindow {
 /// Session name -> its windows in index order. Empty when tmux is missing or
 /// no server is running.
 pub fn tmux_sessions() -> HashMap<String, Vec<TmuxWindow>> {
-  // Apps launched from Finder get a minimal PATH, so look in the usual places.
-  let Some(tmux) = [
-    "/opt/homebrew/bin/tmux",
-    "/usr/local/bin/tmux",
-    "/usr/bin/tmux",
-  ]
-  .into_iter()
-  .find(|p| std::path::Path::new(p).exists()) else {
+  let Some(mut tmux) = crate::activity::tmux() else {
     return HashMap::new();
   };
   let format = "#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{pane_current_path}";
-  let Ok(output) = Command::new(tmux)
-    .args(["list-windows", "-a", "-F", format])
-    .output()
-  else {
+  let Ok(output) = tmux.args(["list-windows", "-a", "-F", format]).output() else {
     return HashMap::new();
   };
   let mut sessions: HashMap<String, Vec<TmuxWindow>> = HashMap::new();

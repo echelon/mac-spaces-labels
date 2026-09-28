@@ -60,26 +60,30 @@ pub struct Agent {
   pub note: Option<String>,
 }
 
-pub fn tmux_binary() -> Option<&'static str> {
-  // Apps launched from Finder get a minimal PATH, so look in the usual places.
-  [
+/// A `tmux` command that works from an app launched by macOS:
+/// * apps get a minimal PATH, so the binary is looked up in the usual places;
+/// * apps get no locale, and without one tmux leaves UTF-8 mode and replaces
+///   control characters (our tab separators) and non-ASCII (agents' spinners
+///   and box drawing) with `_`; `-u` forces UTF-8.
+pub fn tmux() -> Option<Command> {
+  let binary = [
     "/opt/homebrew/bin/tmux",
     "/usr/local/bin/tmux",
     "/usr/bin/tmux",
   ]
   .into_iter()
-  .find(|p| Path::new(p).exists())
+  .find(|p| Path::new(p).exists())?;
+  let mut command = Command::new(binary);
+  command.arg("-u");
+  Some(command)
 }
 
 pub fn tmux_panes() -> Vec<Pane> {
-  let Some(tmux) = tmux_binary() else {
+  let Some(mut tmux) = tmux() else {
     return Vec::new();
   };
   let format = "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}";
-  let Ok(output) = Command::new(tmux)
-    .args(["list-panes", "-a", "-F", format])
-    .output()
-  else {
+  let Ok(output) = tmux.args(["list-panes", "-a", "-F", format]).output() else {
     return Vec::new();
   };
   String::from_utf8_lossy(&output.stdout)
@@ -156,9 +160,9 @@ pub fn agent_kind(pane: &Pane, tree: &HashMap<i32, Vec<(i32, String)>>) -> Optio
 
 /// Reads the agent's screen (`tmux capture-pane`, ~8 ms).
 pub fn agent_status(kind: AgentKind, pane: &Pane) -> Agent {
-  let text = tmux_binary()
-    .and_then(|tmux| {
-      Command::new(tmux)
+  let text = tmux()
+    .and_then(|mut tmux| {
+      tmux
         .args(["capture-pane", "-p", "-t", &pane.target()])
         .output()
         .ok()
