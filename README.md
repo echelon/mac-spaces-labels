@@ -73,6 +73,22 @@ Access → Certificate Assistant → Create a Certificate, type Code Signing) or
 remove `signingIdentity` to fall back to ad-hoc signing, which loses the
 grants on every rebuild.
 
+## Show, then fade
+
+Arriving on a desktop shows its label at full opacity; after `show_ms` it
+fades (lift, shrink, blur) over `fade_ms` and is gone, click-through. Hovering
+a shown or fading label holds it (it fades `linger_ms` after the pointer
+leaves); hovering a gone label does nothing. `rearm_ms` after you leave a
+desktop (once it has slid away) its label is reset, so it is already visible
+the next time that desktop slides in. An open "more" panel or rename form
+holds the label. Menu bar → **Show label briefly when switching** turns this
+off.
+
+Menu bar → **Edit Settings…** opens `settings.json`; saving it applies changes
+live: `show_ms` (1100), `fade_ms` (700), `rearm_ms` (600), `linger_ms` (400),
+`panel_opacity` (0.85), `placement`, `project_names`, `auto_hide`,
+`show_apps`, `vision`.
+
 ## How it stays instant
 
 Each Space gets **its own overlay window**, pinned to it with

@@ -61,6 +61,10 @@ pub struct Overlay {
   /// The clickable region ("more" link or expanded panel), window-relative,
   /// as reported by the page.
   pub hit: Option<Frame>,
+  /// The whole label panel, window-relative: hovering it holds the label.
+  pub panel: Option<Frame>,
+  /// Whether the pointer was over `panel` at the last hover check.
+  pub pointer_inside: bool,
   pub expanded: bool,
 }
 
@@ -86,6 +90,11 @@ pub struct Model {
   pub names: crate::naming::NameStore,
   /// App name -> icon data URL (`None` when it has no icon).
   pub icons: HashMap<String, Option<String>>,
+  /// The Spaces on screen (one per display), updated by the poll the moment
+  /// a switch is seen, ahead of the worker's full snapshot.
+  pub showing: Vec<SpaceId>,
+  /// When `settings.json` was last written, to notice outside edits.
+  pub settings_modified: Option<std::time::SystemTime>,
 }
 
 impl Model {
@@ -102,6 +111,9 @@ impl Model {
       names: &self.names,
       aliases: &self.settings.project_names,
       icons: &self.icons,
+      showing: &self.showing,
+      auto_hide: self.settings.auto_hide,
+      timing: self.settings.timing(),
     }
   }
 
@@ -132,7 +144,11 @@ impl Engine {
     let (tx, rx) = mpsc::channel();
     let (context_tx, context_rx) = mpsc::channel();
     let settings = Settings::load(&settings_path);
+    // Write every setting (defaults included) so the file shows what can be
+    // tuned when opened from the menu bar.
+    settings.save(&settings_path);
     let model = Model {
+      settings_modified: Settings::modified(&settings_path),
       settings,
       names: crate::naming::load(&config_dir),
       ..Default::default()
@@ -233,9 +249,10 @@ impl Engine {
     self.send(Msg::Refresh);
   }
 
-  pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>) {
+  pub fn set_hit_rect(&self, label: &str, hit: Option<Frame>, panel: Option<Frame>) {
     if let Some(o) = self.model.lock().unwrap().overlay_by_label(label) {
       o.hit = hit;
+      o.panel = panel;
     }
   }
 
@@ -243,8 +260,22 @@ impl Engine {
     let mut model = self.model.lock().unwrap();
     change(&mut model.settings);
     model.settings.save(&self.settings_path);
+    model.settings_modified = Settings::modified(&self.settings_path);
     drop(model);
     self.send(Msg::Relayout);
+  }
+
+  /// Picks up edits to `settings.json` made outside the app (menu bar →
+  /// Edit Settings…). Returns whether anything was reloaded.
+  pub fn reload_settings_if_changed(&self) -> bool {
+    let modified = Settings::modified(&self.settings_path);
+    let mut model = self.model.lock().unwrap();
+    if modified == model.settings_modified {
+      return false;
+    }
+    model.settings_modified = modified;
+    model.settings = Settings::load(&self.settings_path);
+    true
   }
 }
 
@@ -296,14 +327,31 @@ fn poll_loop(app: AppHandle) {
     if active != last {
       last = active;
       let now = Instant::now();
-      let title = {
+      // Which Spaces are showing on every display (~100 µs), so the arriving
+      // desktop's label starts its show-then-fade and the departing one
+      // re-arms for next time.
+      let showing: Vec<SpaceId> = engine.spaces.snapshot().current_spaces().collect();
+      let (title, changes) = {
         let mut model = engine.model.lock().unwrap();
         model.last_switch = Some((active, now));
-        model
+        let previous = std::mem::replace(&mut model.showing, showing.clone());
+        let mut changes = Vec::new();
+        for (space, overlay) in model.overlays.iter_mut() {
+          let (was, is) = (previous.contains(space), showing.contains(space));
+          if was != is {
+            overlay.pointer_inside = false;
+            changes.push((overlay.label.clone(), is));
+          }
+        }
+        let title = model
           .snapshot
           .space(active)
-          .map(|(_, space)| model.title_for(space))
+          .map(|(_, space)| model.title_for(space));
+        (title, changes)
       };
+      for (label, is_showing) in changes {
+        let _ = app.emit_to(label.as_str(), "space-active", is_showing);
+      }
       // Unknown Space (just created): the worker's snapshot will name it.
       if let (Some(title), Some(tray)) = (title, app.tray_by_id(TRAY_ID)) {
         let _ = tray.set_title(Some(tray_title(&title)));
@@ -322,7 +370,29 @@ fn poll_loop(app: AppHandle) {
 fn update_hover(app: &AppHandle, engine: &Engine) {
   let (x, y) = spaces_sys::mouse_location();
   let mut model = engine.model.lock().unwrap();
-  let showing: Vec<SpaceId> = model.snapshot.current_spaces().collect();
+  let showing = model.showing.clone();
+  // Tell a showing label when the pointer enters or leaves it (it holds
+  // while hovered and fades once the pointer leaves).
+  let mut pointer_events = Vec::new();
+  for (space, overlay) in model.overlays.iter_mut() {
+    let inside = showing.contains(space)
+      && overlay
+        .panel
+        .is_some_and(|panel| panel.offset(overlay.frame).contains(x, y));
+    if inside != overlay.pointer_inside {
+      overlay.pointer_inside = inside;
+      pointer_events.push((overlay.label.clone(), inside));
+    }
+  }
+  if !pointer_events.is_empty() {
+    let app = app.clone();
+    // Emitting evaluates script in the webview; keep it off the lock.
+    std::thread::spawn(move || {
+      for (label, inside) in pointer_events {
+        let _ = app.emit_to(label.as_str(), "pointer", inside);
+      }
+    });
+  }
   let target = model
     .overlays
     .iter()
@@ -355,6 +425,10 @@ fn worker_loop(app: AppHandle, rx: Receiver<Msg>) {
       }
       Err(RecvTimeoutError::Timeout) => {}
       Err(RecvTimeoutError::Disconnected) => return,
+    }
+    if app.state::<Engine>().reload_settings_if_changed() {
+      relayout = true;
+      full = true;
     }
     // Coalesce a burst (a switch fires the poll and a notification) into one pass.
     while let Ok(msg) = rx.try_recv() {
@@ -480,6 +554,8 @@ fn reconcile(app: &AppHandle, relayout: bool) {
             sent: None,
             frame: created.frame,
             hit: None,
+            panel: None,
+            pointer_inside: false,
             expanded: false,
           },
         );

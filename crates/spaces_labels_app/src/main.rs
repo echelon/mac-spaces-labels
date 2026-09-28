@@ -30,10 +30,16 @@ fn set_expanded(window: WebviewWindow, engine: State<Engine>, expanded: bool) {
   engine.set_expanded(window.app_handle(), window.label(), expanded);
 }
 
-/// The page reports its clickable region (window-relative points), or `None`.
+/// The page reports its clickable region and its whole panel
+/// (window-relative points), or `None` while hidden.
 #[tauri::command]
-fn set_hit_rect(window: WebviewWindow, engine: State<Engine>, rect: Option<overlay::Frame>) {
-  engine.set_hit_rect(window.label(), rect);
+fn set_hit_rect(
+  window: WebviewWindow,
+  engine: State<Engine>,
+  rect: Option<overlay::Frame>,
+  panel: Option<overlay::Frame>,
+) {
+  engine.set_hit_rect(window.label(), rect, panel);
 }
 
 #[tauri::command]
@@ -94,6 +100,14 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     settings.show_apps,
     None::<&str>,
   )?;
+  let auto_hide = CheckMenuItem::with_id(
+    app,
+    "auto_hide",
+    "Show label briefly when switching",
+    true,
+    settings.auto_hide,
+    None::<&str>,
+  )?;
   let describe = CheckMenuItem::with_id(
     app,
     "vision",
@@ -102,6 +116,8 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     settings.vision,
     None::<&str>,
   )?;
+  let edit_settings =
+    MenuItem::with_id(app, "edit_settings", "Edit Settings…", true, Some("Cmd+,"))?;
   let quit = MenuItem::with_id(app, "quit", "Quit Spaces Labels", true, Some("Cmd+Q"))?;
   // Window titles need Screen Recording; macOS applies a grant on relaunch.
   let allow_titles = MenuItem::with_id(
@@ -112,11 +128,13 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     None::<&str>,
   )?;
   let separator = PredefinedMenuItem::separator(app)?;
-  let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&position, &show_apps, &describe];
+  let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> =
+    vec![&position, &auto_hide, &show_apps, &describe];
   if titles_missing {
     items.push(&allow_titles);
   }
   items.push(&separator);
+  items.push(&edit_settings);
   items.push(&quit);
   let menu = Menu::with_items(app, &items)?;
 
@@ -133,6 +151,14 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
       let engine = app.state::<Engine>();
       match event.id().as_ref() {
         "quit" => app.exit(0),
+        // Opens settings.json in the default text editor; saving it applies
+        // the changes live (the worker watches the file).
+        "edit_settings" => {
+          let _ = std::process::Command::new("/usr/bin/open")
+            .arg("-t")
+            .arg(&engine.settings_path)
+            .spawn();
+        }
         "allow_titles" => {
           let _ = std::process::Command::new("/usr/bin/open")
             .arg(SCREEN_RECORDING_SETTINGS)
@@ -140,6 +166,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
         }
         "show_apps" => engine.update_settings(|s| s.show_apps = !s.show_apps),
         "vision" => engine.update_settings(|s| s.vision = !s.vision),
+        "auto_hide" => engine.update_settings(|s| s.auto_hide = !s.auto_hide),
         id => {
           if let Some((placement, _)) = Placement::all().find(|(p, _)| p.id() == id) {
             engine.update_settings(|s| s.placement = placement);

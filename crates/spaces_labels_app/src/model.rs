@@ -2,6 +2,7 @@
 
 use crate::headline::{self, Chip};
 use crate::naming::NameStore;
+use crate::settings::Timing;
 use crate::vision::{VisionNote, VisionStatus};
 use app_context::SpaceContext;
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,10 @@ pub struct OverlayState {
   pub titles_readable: bool,
   pub expanded: bool,
   pub vision: VisionStatus,
+  /// On screen now: the page shows, then fades, the label (see `app.js`).
+  pub showing: bool,
+  pub auto_hide: bool,
+  pub timing: Timing,
 }
 
 /// Everything an overlay's state is derived from.
@@ -116,6 +121,9 @@ pub struct Sources<'a> {
   pub aliases: &'a HashMap<String, String>,
   /// App name -> icon data URL.
   pub icons: &'a HashMap<String, Option<String>>,
+  pub showing: &'a [SpaceId],
+  pub auto_hide: bool,
+  pub timing: Timing,
 }
 
 /// Fills in the vision model's latest description of each window.
@@ -242,5 +250,8 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     titles_readable: sources.titles_readable,
     expanded,
     vision: sources.vision_status.clone(),
+    showing: sources.showing.contains(&space_id),
+    auto_hide: sources.auto_hide,
+    timing: sources.timing.clone(),
   })
 }

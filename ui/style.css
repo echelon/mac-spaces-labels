@@ -53,6 +53,19 @@ body.center, body.center_big, body.hero, body.hero_big { align-items: center; ju
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
 }
 .label[hidden] { display: none; }
+
+/* Show-then-fade (see app.js): lift, shrink a little and blur away. The
+   page sets the duration per step (fade, hover restore, instant reset). */
+.label {
+  transition-property: opacity, transform, filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+body[data-phase="fading"] .label,
+body[data-phase="hidden"] .label {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.96);
+  filter: blur(4px);
+}
 body.top_right .label, body.bottom_right .label {
   text-align: right;
   align-items: flex-end;

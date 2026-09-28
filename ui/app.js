@@ -27,6 +27,80 @@ let state = null;
 let expanded = false;
 let editing = false;
 
+// Show-then-fade. Each desktop has its own overlay window, which slides in
+// with its desktop, so a label must be fully shown ("shown") before its
+// desktop appears. On arrival it waits `show_ms`, fades over `fade_ms`
+// ("fading") and ends "hidden" (invisible and click-through). Hovering a
+// shown or fading label holds it; hovering a hidden one does nothing. After
+// the desktop is left (and has slid away, `rearm_ms`) the label is reset to
+// "shown", ready for the next visit.
+let phase = "shown";
+let showing = false;
+let pointerInside = false;
+let fadeTimer = 0;
+let rearmTimer = 0;
+const DEFAULT_TIMING = { show_ms: 1100, fade_ms: 700, rearm_ms: 600, linger_ms: 400, panel_opacity: 0.85 };
+const timing = () => (state && state.timing) || DEFAULT_TIMING;
+const autoHide = () => state && state.auto_hide && !expanded && !editing;
+
+function setPhase(next, durationMs) {
+  label.style.transitionDuration = `${durationMs}ms`;
+  phase = next;
+  document.body.dataset.phase = next;
+  reportHitRect();
+}
+
+function clearTimers() {
+  clearTimeout(fadeTimer);
+  clearTimeout(rearmTimer);
+}
+
+// Fade after `delay` unless something holds the label by then.
+function scheduleFade(delay) {
+  clearTimeout(fadeTimer);
+  if (!autoHide()) return;
+  fadeTimer = setTimeout(() => {
+    if (pointerInside || !autoHide()) return;
+    setPhase("fading", timing().fade_ms);
+    fadeTimer = setTimeout(() => setPhase("hidden", 0), timing().fade_ms);
+  }, delay);
+}
+
+function rearm() {
+  clearTimers();
+  if (editing) closeRename();
+  if (expanded) {
+    expanded = false;
+    invoke("set_expanded", { expanded: false });
+  }
+  setPhase("shown", 0);
+  render();
+}
+
+function setShowing(next) {
+  if (next === showing) return;
+  showing = next;
+  clearTimers();
+  if (showing) {
+    if (phase !== "shown") rearm(); // Came back before the reset ran.
+    scheduleFade(timing().show_ms);
+  } else {
+    pointerInside = false;
+    rearmTimer = setTimeout(rearm, timing().rearm_ms);
+  }
+}
+
+function setPointer(inside) {
+  pointerInside = inside;
+  if (phase === "hidden" || !showing) return;
+  if (inside) {
+    clearTimeout(fadeTimer);
+    setPhase("shown", 150);
+  } else {
+    scheduleFade(timing().linger_ms);
+  }
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -201,6 +275,7 @@ function render(next) {
   if (!state) return;
   document.body.className = state.placement + (expanded ? " expanded" : "");
   document.documentElement.style.setProperty("--accent", state.color);
+  document.documentElement.style.setProperty("--panel", `rgba(10, 12, 22, ${timing().panel_opacity})`);
   eyebrowEl.textContent = state.name_source === "user" ? `${state.desktop} · your name` : state.desktop;
   nameEl.textContent = state.name;
   subtitleEl.textContent = state.subtitle || "";
@@ -222,16 +297,20 @@ function render(next) {
 // Only report changes: the region is hit-tested at ~60 Hz on the Rust side.
 let lastHit = "";
 function reportHitRect() {
-  const target = expanded ? label : moreEl;
-  const r = target.getBoundingClientRect();
-  const pad = expanded ? 0 : 6;
-  const rect = r.width && r.height
-    ? { x: r.left - pad, y: r.top - pad, width: r.width + 2 * pad, height: r.height + 2 * pad }
-    : null;
-  const key = JSON.stringify(rect);
+  const box = (node, pad) => {
+    const r = node.getBoundingClientRect();
+    return r.width && r.height
+      ? { x: r.left - pad, y: r.top - pad, width: r.width + 2 * pad, height: r.height + 2 * pad }
+      : null;
+  };
+  // A hidden label neither takes clicks nor reacts to hovering.
+  const hidden = phase === "hidden";
+  const rect = hidden ? null : expanded ? box(label, 0) : box(moreEl, 6);
+  const panel = hidden ? null : box(label, 0);
+  const key = JSON.stringify([rect, panel]);
   if (key === lastHit) return;
   lastHit = key;
-  invoke("set_hit_rect", { rect });
+  invoke("set_hit_rect", { rect, panel });
 }
 
 function openRename() {
@@ -274,11 +353,26 @@ moreEl.addEventListener("click", () => {
   render();
   detailsEl.scrollTop = 0;
   invoke("set_expanded", { expanded });
+  // An open panel stays; closing it lets the label fade again.
+  if (expanded) clearTimeout(fadeTimer);
+  else scheduleFade(timing().linger_ms);
 });
 
 new ResizeObserver(() => {
   fitTitle();
   reportHitRect();
 }).observe(document.body);
-currentWindow.listen("overlay-state", (event) => render(event.payload));
-invoke("overlay_state").then(render);
+function onState(next) {
+  if (!next) return;
+  const hadAutoHide = state && state.auto_hide;
+  render(next);
+  if (hadAutoHide && !next.auto_hide) rearm();
+  setShowing(next.showing);
+  if (!hadAutoHide && next.auto_hide && showing && phase === "shown") scheduleFade(timing().show_ms);
+}
+
+currentWindow.listen("overlay-state", (event) => onState(event.payload));
+// Pushed by the poll the moment the desktop switches (ahead of the state).
+currentWindow.listen("space-active", (event) => setShowing(event.payload));
+currentWindow.listen("pointer", (event) => setPointer(event.payload));
+invoke("overlay_state").then(onState);
