@@ -18,6 +18,8 @@ pub enum Placement {
   /// Centered horizontally, vertically centered on the top quarter line:
   /// where the eye lands mid-switch, like a website's hero section.
   Hero,
+  /// Hero position at poster size.
+  HeroBig,
 }
 
 impl Placement {
@@ -27,10 +29,11 @@ impl Placement {
     (Placement::BottomLeft, "Bottom left"),
     (Placement::BottomRight, "Bottom right"),
   ];
-  pub const CENTERED: [(Placement, &'static str); 3] = [
+  pub const CENTERED: [(Placement, &'static str); 4] = [
     (Placement::Center, "Center"),
     (Placement::CenterBig, "Center (big)"),
     (Placement::Hero, "Hero (upper center)"),
+    (Placement::HeroBig, "Hero (upper center, big)"),
   ];
 
   pub fn all() -> impl Iterator<Item = (Placement, &'static str)> {
@@ -46,6 +49,7 @@ impl Placement {
       Placement::Center => "placement:center",
       Placement::CenterBig => "placement:center_big",
       Placement::Hero => "placement:hero",
+      Placement::HeroBig => "placement:hero_big",
     }
   }
 
@@ -54,6 +58,9 @@ impl Placement {
   pub fn window_size(self) -> (f64, f64) {
     match self {
       Placement::CenterBig => (1200.0, 720.0),
+      // Shorter than CenterBig so the window can center on the quarter line
+      // without being pushed down against the menu bar.
+      Placement::HeroBig => (1200.0, 520.0),
       Placement::Center | Placement::Hero => (720.0, 420.0),
       _ => (480.0, 360.0),
     }

@@ -129,7 +129,9 @@ fn frame_for(
     Placement::BottomLeft => LogicalPosition::new(left, bottom),
     Placement::BottomRight => LogicalPosition::new(right, bottom),
     Placement::Center | Placement::CenterBig => LogicalPosition::new(center_x, center_y),
-    Placement::Hero => LogicalPosition::new(center_x, (y + height / 4.0 - h / 2.0).max(top)),
+    Placement::Hero | Placement::HeroBig => {
+      LogicalPosition::new(center_x, (y + height / 4.0 - h / 2.0).max(top))
+    }
   };
   Some((position, (w, h)))
 }

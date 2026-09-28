@@ -108,8 +108,8 @@ body.top_right .apps li::after, body.bottom_right .apps li::after {
 
 /* Centered placements: the window itself is centered on screen, so center
    the label inside it; the accent moves under the name. */
-body.center, body.center_big, body.hero { align-items: center; justify-content: center; }
-body.center .label, body.center_big .label, body.hero .label {
+body.center, body.center_big, body.hero, body.hero_big { align-items: center; justify-content: center; }
+body.center .label, body.center_big .label, body.hero .label, body.hero_big .label {
   align-items: center;
   text-align: center;
   border-left: none;
@@ -117,7 +117,7 @@ body.center .label, body.center_big .label, body.hero .label {
   padding: 14px 28px 16px;
   border-radius: 20px;
 }
-body.center .apps, body.center_big .apps, body.hero .apps {
+body.center .apps, body.center_big .apps, body.hero .apps, body.hero_big .apps {
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: center;
@@ -127,7 +127,7 @@ body.center .apps, body.center_big .apps, body.hero .apps {
 body.center h1, body.hero h1 { font-size: 56px; }
 body.center .apps, body.hero .apps { font-size: 16px; }
 
-body.center_big .label { padding: 24px 48px 28px; border-radius: 32px; border-bottom-width: 6px; gap: 12px; }
-body.center_big h1 { font-size: 128px; letter-spacing: -0.03em; }
-body.center_big .apps { font-size: 26px; column-gap: 28px; }
-body.center_big .apps li::before { width: 10px; height: 10px; margin-right: 10px; vertical-align: 4px; }
+body.center_big .label, body.hero_big .label { padding: 24px 48px 28px; border-radius: 32px; border-bottom-width: 6px; gap: 12px; }
+body.center_big h1, body.hero_big h1 { font-size: 128px; letter-spacing: -0.03em; }
+body.center_big .apps, body.hero_big .apps { font-size: 26px; column-gap: 28px; }
+body.center_big .apps li::before, body.hero_big .apps li::before { width: 10px; height: 10px; margin-right: 10px; vertical-align: 4px; }
