@@ -24,6 +24,24 @@ windows, tabs and terminals) uses:
 | tmux | `tmux list-windows -a`, keyed by the session name that `set-titles` puts first in the terminal title | none |
 | every app | window titles; also how Ghostty windows are matched | Screen Recording (menu bar → Allow window titles, then relaunch) |
 
+| Claude Code, Codex | process tree finds the agent's tmux pane; `tmux capture-pane` gives working / waiting / idle, the live status line, and Claude's recap or Codex's task | none |
+| local dev sites | `lsof` maps a `localhost:PORT` tab to the listening process and its working directory | none |
+| window screenshots → local VLM | `screencapture -l` (works across Spaces) → Qwen3-VL-2B via Homebrew `llama-server` on 127.0.0.1 | Screen Recording |
+
+Each desktop also gets a **projects** list (the repository roots its agents,
+terminals, dev sites and IDE windows point at, most active first), shown under
+the app list, e.g. "artcraft · Claude working · dev site :4201".
+
+The VLM is optional (menu bar → Describe windows with local AI). Put
+`Qwen3VL-2B-Instruct-Q8_0.gguf` and `mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf`
+(from `Qwen/Qwen3-VL-2B-Instruct-GGUF`) in
+`~/Library/Application Support/io.echelon.spaces-labels/models/`. On an M4
+Pro it takes 1.0–1.6 s per window at 1024 image tokens, near-zero CPU (Metal),
+and ~3.7 GB while loaded. It runs one window at a time with a 3 s cooldown,
+refreshes a window every 60 s (showing desktop) or 5 min (others) unless its
+title changes, pauses under serious thermal pressure or Low Power Mode, and
+stops after 10 idle minutes.
+
 Browser windows are matched to WindowServer windows by bounds, so tabs work
 without Screen Recording. The latest context of every desktop is written to
 `~/Library/Application Support/io.echelon.spaces-labels/context.json`.

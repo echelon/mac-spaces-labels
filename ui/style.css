@@ -232,3 +232,52 @@ body.expanded .more { align-self: flex-start; }
   vertical-align: 2px;
 }
 .details .overflow { color: var(--muted); font-style: italic; }
+
+/* The desktop's main project(s), under the app list. */
+.focus {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.focus[hidden] { display: none; }
+body.center .focus, body.hero .focus { font-size: 16px; }
+body.center_big .focus, body.hero_big .focus { font-size: 24px; }
+
+.details .status {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.details .status.working { color: #0b2e13; background: #69db7c; }
+.details .status.waiting { color: #3b2a00; background: #ffd43b; }
+.details .note {
+  margin: 0 0 3px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.62);
+}
+/* Local VLM output: debug-styled on purpose. */
+.details .vision {
+  margin: 2px 0 4px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #c5f6fa;
+  background: rgba(21, 170, 191, 0.14);
+}

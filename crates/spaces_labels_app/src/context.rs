@@ -6,7 +6,7 @@
 //! desktop for later use (e.g. naming desktops with a local model).
 
 use crate::engine::{debug_enabled, Engine, Msg};
-use crate::model::space_name;
+use crate::model::{space_name, with_vision};
 use app_context::Collector;
 use serde_json::json;
 use std::path::PathBuf;
@@ -65,7 +65,7 @@ fn run(app: AppHandle, rx: Receiver<()>, out: PathBuf) {
 }
 
 /// Writes every desktop's latest context, in Mission Control order.
-fn save(engine: &Engine, out: &PathBuf) {
+pub fn save(engine: &Engine, out: &PathBuf) {
   let json = {
     let model = engine.model.lock().unwrap();
     let Some(contexts) = model.contexts.as_ref() else {
@@ -82,7 +82,10 @@ fn save(engine: &Engine, out: &PathBuf) {
           "space_uuid": space.uuid,
           "display": display.uuid,
           "name": space_name(space),
-          "apps": contexts.get(&space.id).map(|c| &c.apps),
+          "projects": contexts.get(&space.id).map(|c| &c.projects),
+          "apps": contexts
+            .get(&space.id)
+            .map(|c| with_vision(c.clone(), &model.vision).apps),
         })
       })
       .collect();

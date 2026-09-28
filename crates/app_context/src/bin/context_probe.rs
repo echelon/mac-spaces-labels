@@ -7,6 +7,12 @@ use std::time::Instant;
 
 fn main() {
   let skip_chrome = std::env::args().any(|a| a == "--no-chrome");
+  if std::env::args().any(|a| a == "--windows") {
+    for w in Spaces::connect().windows(0) {
+      println!("{}\t{}\t{}\t{:?}", w.id, w.space, w.app, w.title);
+    }
+    return;
+  }
   if std::env::args().any(|a| a == "--firefox") {
     // Bounds from both sides, to debug window matching.
     for w in Spaces::connect().windows(0) {

@@ -11,6 +11,8 @@ pub struct Settings {
   #[serde(alias = "corner")]
   pub placement: Placement,
   pub show_apps: bool,
+  /// Describe windows with the local vision model (when installed).
+  pub vision: bool,
 }
 
 impl Default for Settings {
@@ -18,6 +20,7 @@ impl Default for Settings {
     Self {
       placement: Placement::default(),
       show_apps: true,
+      vision: true,
     }
   }
 }

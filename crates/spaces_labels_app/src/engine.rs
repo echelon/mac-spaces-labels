@@ -79,6 +79,9 @@ pub struct Model {
   pub titles_readable: bool,
   /// The overlay currently accepting the mouse, if any.
   pub interactive: Option<String>,
+  /// Window number -> the vision model's latest description.
+  pub vision: HashMap<u32, crate::vision::VisionNote>,
+  pub vision_status: crate::vision::VisionStatus,
 }
 
 impl Model {
@@ -90,6 +93,8 @@ impl Model {
       titles_readable: self.titles_readable,
       placement: self.settings.placement,
       show_apps: self.settings.show_apps,
+      vision: &self.vision,
+      vision_status: &self.vision_status,
     }
   }
 

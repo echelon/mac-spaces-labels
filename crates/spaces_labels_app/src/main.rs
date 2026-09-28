@@ -9,6 +9,7 @@ mod engine;
 mod model;
 mod overlay;
 mod settings;
+mod vision;
 
 use engine::{Engine, TRAY_ID};
 use model::{OverlayState, Placement};
@@ -74,6 +75,14 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     settings.show_apps,
     None::<&str>,
   )?;
+  let describe = CheckMenuItem::with_id(
+    app,
+    "vision",
+    "Describe windows with local AI",
+    true,
+    settings.vision,
+    None::<&str>,
+  )?;
   let quit = MenuItem::with_id(app, "quit", "Quit Spaces Labels", true, Some("Cmd+Q"))?;
   // Window titles need Screen Recording; macOS applies a grant on relaunch.
   let allow_titles = MenuItem::with_id(
@@ -84,7 +93,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
     None::<&str>,
   )?;
   let separator = PredefinedMenuItem::separator(app)?;
-  let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&position, &show_apps];
+  let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&position, &show_apps, &describe];
   if titles_missing {
     items.push(&allow_titles);
   }
@@ -111,6 +120,7 @@ fn build_tray(app: &tauri::App, engine: &Engine, titles_missing: bool) -> tauri:
             .spawn();
         }
         "show_apps" => engine.update_settings(|s| s.show_apps = !s.show_apps),
+        "vision" => engine.update_settings(|s| s.vision = !s.vision),
         id => {
           if let Some((placement, _)) = Placement::all().find(|(p, _)| p.id() == id) {
             engine.update_settings(|s| s.placement = placement);
@@ -149,6 +159,7 @@ fn main() {
       engine::observe_workspace(app.handle());
       engine::start(app.handle(), rx);
       context::start(app.handle(), context_rx, config_dir.join("context.json"));
+      vision::start(app.handle());
       Ok(())
     })
     .build(tauri::generate_context!())

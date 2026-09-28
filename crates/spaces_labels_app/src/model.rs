@@ -1,5 +1,6 @@
 //! What each overlay window shows, derived from the latest Spaces snapshot.
 
+use crate::vision::{VisionNote, VisionStatus};
 use app_context::SpaceContext;
 use serde::{Deserialize, Serialize};
 use spaces_sys::{AppsBySpace, Snapshot, Space, SpaceId, SpaceKind};
@@ -83,6 +84,7 @@ pub struct OverlayState {
   /// Screen Recording granted, so other apps' window titles are known.
   pub titles_readable: bool,
   pub expanded: bool,
+  pub vision: VisionStatus,
 }
 
 /// Everything an overlay's state is derived from.
@@ -93,6 +95,16 @@ pub struct Sources<'a> {
   pub titles_readable: bool,
   pub placement: Placement,
   pub show_apps: bool,
+  pub vision: &'a HashMap<u32, VisionNote>,
+  pub vision_status: &'a VisionStatus,
+}
+
+/// Fills in the vision model's latest description of each window.
+pub fn with_vision(mut context: SpaceContext, vision: &HashMap<u32, VisionNote>) -> SpaceContext {
+  for window in context.apps.iter_mut().flat_map(|a| a.windows.iter_mut()) {
+    window.vision = vision.get(&window.id).map(|note| note.text.clone());
+  }
+  context
 }
 
 /// Distinct hues so neighbouring desktops never look alike. Placeholder until
@@ -125,10 +137,14 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     apps,
     placement: sources.placement,
     show_apps: sources.show_apps,
-    context: sources
-      .contexts
-      .map(|all| all.get(&space_id).cloned().unwrap_or_default()),
+    context: sources.contexts.map(|all| {
+      with_vision(
+        all.get(&space_id).cloned().unwrap_or_default(),
+        sources.vision,
+      )
+    }),
     titles_readable: sources.titles_readable,
     expanded,
+    vision: sources.vision_status.clone(),
   })
 }

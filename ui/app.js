@@ -14,6 +14,7 @@ const nameEl = document.getElementById("name");
 const appsEl = document.getElementById("apps");
 const detailsEl = document.getElementById("details");
 const moreEl = document.getElementById("more");
+const focusEl = document.getElementById("focus");
 
 let state = null;
 let expanded = false;
@@ -34,12 +35,31 @@ function renderApps() {
   appsEl.hidden = expanded || !state.show_apps || rows.length === 0;
 }
 
+// "artcraft · Claude working · dev site :4201": what this desktop is for.
+function projectLine(project) {
+  return [project.name, ...project.signals.slice(0, 2)].join(" · ");
+}
+
+function renderFocus() {
+  const projects = state.context ? state.context.projects : [];
+  focusEl.textContent = projects.slice(0, 2).map(projectLine).join("   ");
+  focusEl.hidden = expanded || projects.length === 0;
+}
+
+function statusClass(status) {
+  if (status.includes("working")) return "status working";
+  if (status.includes("waiting")) return "status waiting";
+  return "status";
+}
+
 function entryRow(entry) {
   const li = el("li", entry.active ? "entry active" : "entry");
   const line = el("div", "line");
   line.append(el("span", "title", entry.title || "Untitled"));
+  if (entry.status) line.append(el("span", statusClass(entry.status), entry.status));
   if (entry.detail) line.append(el("span", "detail", entry.detail));
   li.append(line);
+  if (entry.note) li.append(el("div", "note", entry.note));
   if (entry.children.length) {
     const children = el("ul", "children");
     children.append(...entry.children.map(entryRow));
@@ -53,7 +73,19 @@ function renderDetails() {
   if (!state.titles_readable) {
     nodes.push(el("p", "hint", "Window titles need Screen Recording: menu bar icon → Allow window titles, then relaunch."));
   }
+  const vision = state.vision;
+  if (vision.enabled && vision.blocked) nodes.push(el("p", "hint", `Window descriptions: ${vision.blocked}.`));
   const context = state.context;
+  if (context && context.projects.length) {
+    const section = el("section", "app projects");
+    section.append(el("h2", null, "Projects"));
+    const list = el("ul", "tabs");
+    list.append(...context.projects.map((p) => entryRow({
+      title: p.name, detail: p.path, active: false, status: null, note: p.signals.join(" · "), children: [],
+    })));
+    section.append(list);
+    nodes.push(section);
+  }
   if (!context) {
     nodes.push(el("p", "hint", "Gathering details…"));
   } else if (!context.apps.length) {
@@ -68,6 +100,7 @@ function renderDetails() {
       if (title && (app.windows.length > 1 || !win.tabs.length)) {
         section.append(el("div", "window-title", title));
       }
+      if (win.vision) section.append(el("div", "vision", `👁 ${win.vision}`));
       if (!win.tabs.length) return;
       const list = el("ul", "tabs");
       list.append(...win.tabs.slice(0, MAX_TABS).map(entryRow));
@@ -87,6 +120,7 @@ function render(next) {
   document.documentElement.style.setProperty("--accent", state.color);
   nameEl.textContent = state.name;
   renderApps();
+  renderFocus();
   if (expanded) renderDetails();
   else detailsEl.hidden = true;
   moreEl.textContent = expanded ? "less ▴" : "more ▾";
