@@ -1,0 +1,106 @@
+/* The window is transparent and click-through; only the text is visible.
+   Heavy shadows keep it legible over any wallpaper or window. */
+:root {
+  --accent: #748ffc;
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.78);
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+body {
+  display: flex;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+/* Corner classes anchor the label inside the fixed-size window. */
+body.top_left { align-items: flex-start; justify-content: flex-start; }
+body.top_right { align-items: flex-start; justify-content: flex-end; }
+body.bottom_left { align-items: flex-end; justify-content: flex-start; }
+body.bottom_right { align-items: flex-end; justify-content: flex-end; }
+body.top_right .label, body.bottom_right .label { text-align: right; align-items: flex-end; }
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+  padding: 10px 16px 12px;
+  border-radius: 14px;
+  background: rgba(12, 14, 26, 0.5);
+  border-left: 4px solid var(--accent);
+}
+body.top_right .label, body.bottom_right .label {
+  border-left: none;
+  border-right: 4px solid var(--accent);
+}
+
+.label[hidden] { display: none; }
+
+h1 {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65), 0 0 14px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.apps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+.apps li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.apps li::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+body.top_right .apps li::before, body.bottom_right .apps li::before { display: none; }
+body.top_right .apps li::after, body.bottom_right .apps li::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+
+.apps .more { opacity: 0.75; font-weight: 500; }
+.apps .more::before, .apps .more::after { visibility: hidden; }
+.apps[hidden] { display: none; }

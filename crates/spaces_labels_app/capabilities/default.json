@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Per-Space overlay windows receive their state",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}
