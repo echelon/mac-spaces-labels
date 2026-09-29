@@ -333,7 +333,10 @@ function render(next) {
   document.body.className = state.placement + (expanded ? " expanded" : "");
   document.documentElement.style.setProperty("--accent", state.color);
   document.documentElement.style.setProperty("--panel", `rgba(10, 12, 22, ${timing().panel_opacity})`);
+  label.classList.toggle("empty", state.empty);
   eyebrowEl.textContent = state.name_source === "user" ? `${state.desktop} · your name` : state.desktop;
+  // An empty desktop's title already is "Desktop N".
+  eyebrowEl.hidden = state.empty && !expanded;
   nameEl.textContent = state.name;
   subtitleEl.textContent = state.subtitle || "";
   subtitleEl.hidden = !state.subtitle || editing;
@@ -346,6 +349,7 @@ function render(next) {
   if (expanded) renderDetails();
   else detailsEl.hidden = true;
   moreEl.textContent = expanded ? "less ▴" : "more ▾";
+  moreEl.hidden = state.empty && !expanded;
   label.hidden = false;
   fitTitle();
   reportHitRect();

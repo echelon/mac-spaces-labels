@@ -80,6 +80,15 @@ fn main() {
     }
     return;
   }
+  if std::env::args().nth(1).as_deref() == Some("tags") {
+    for id in std::env::args()
+      .skip(2)
+      .filter_map(|a| a.parse::<u32>().ok())
+    {
+      println!("{id}: {:064b}", spaces.window_tags(id));
+    }
+    return;
+  }
   if std::env::args().nth(1).as_deref() != Some("watch") {
     return;
   }

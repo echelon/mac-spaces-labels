@@ -103,6 +103,8 @@ pub struct OverlayState {
   pub vision: VisionStatus,
   /// On screen now: the page shows, then fades, the label (see `app.js`).
   pub showing: bool,
+  /// No windows at all: the page shows only a small "Desktop N (empty)".
+  pub empty: bool,
   pub auto_hide: bool,
   pub timing: Timing,
 }
@@ -218,10 +220,24 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
       sources.vision,
     )
   });
-  let titles = titles(space, sources.names, context.as_ref(), sources.aliases);
+  // An empty desktop drops every name (yours, computed or the model's,
+  // which would be stale): just "Desktop N", small, "(empty)".
+  let empty = sources
+    .apps
+    .get(&space_id)
+    .is_none_or(|apps| apps.is_empty());
+  let titles = if empty {
+    Titles {
+      title: space_name(space),
+      source: "default",
+      subtitle: Some("(empty)".into()),
+    }
+  } else {
+    titles(space, sources.names, context.as_ref(), sources.aliases)
+  };
   let chips = match &context {
-    Some(context) => headline::chips(context),
-    None => Vec::new(),
+    Some(context) if !empty => headline::chips(context),
+    _ => Vec::new(),
   };
   let icons = chips
     .iter()
@@ -251,6 +267,7 @@ pub fn overlay_state(sources: &Sources, space_id: SpaceId, expanded: bool) -> Op
     expanded,
     vision: sources.vision_status.clone(),
     showing: sources.showing.contains(&space_id),
+    empty,
     auto_hide: sources.auto_hide,
     timing: sources.timing.clone(),
   })

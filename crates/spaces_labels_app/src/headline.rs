@@ -163,6 +163,14 @@ fn site_name(host: &str) -> String {
     ("mail.google.com", "Gmail"),
     ("calendar.google.com", "Calendar"),
     ("twitch.tv", "Twitch"),
+    ("chatgpt.com", "ChatGPT"),
+    ("claude.ai", "Claude"),
+    ("google.com", "Google"),
+    ("stackoverflow.com", "Stack Overflow"),
+    ("wikipedia.org", "Wikipedia"),
+    ("docs.rs", "docs.rs"),
+    ("huggingface.co", "Hugging Face"),
+    ("linkedin.com", "LinkedIn"),
   ];
   if let Some((_, name)) = known
     .iter()

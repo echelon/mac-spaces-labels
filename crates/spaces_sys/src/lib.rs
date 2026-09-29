@@ -68,6 +68,11 @@ impl Spaces {
     windows::describe_windows(self.cid, pid)
   }
 
+  /// WindowServer tag bits of a window, for diagnostics.
+  pub fn window_tags(self, window: u32) -> u64 {
+    windows::window_tags(self.cid, window)
+  }
+
   /// Normal windows that each belong to one Space, front-most first.
   /// `exclude_pid` hides our own overlay windows.
   pub fn windows(self, exclude_pid: i32) -> Vec<WindowInfo> {

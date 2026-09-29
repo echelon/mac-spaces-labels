@@ -371,3 +371,17 @@ body.expanded .more { align-self: flex-start; }
 }
 .rename button[type="submit"] { background: var(--accent); color: #111; }
 .rename .fine { margin: 0; font-size: 11px; font-weight: 500; opacity: 0.8; }
+
+/* An empty desktop: just "Desktop N" and "(empty)", small. The extra
+   selector weight beats the per-placement sizes above. */
+body[class] .label.empty:not(:has(.details:not([hidden]))) {
+  --title-max: 30;
+  --subtitle-size: 14px;
+  gap: 2px;
+  padding: 10px 22px 8px;
+  border-radius: 16px;
+  border-bottom-width: 3px;
+}
+body[class] .label.empty h1 { color: var(--muted); }
+body[class] .label.empty .subtitle { color: rgba(255, 255, 255, 0.55); font-weight: 500; }
+.eyebrow[hidden], .more[hidden] { display: none; }

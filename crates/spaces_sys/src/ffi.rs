@@ -25,6 +25,7 @@ extern "C" {
   pub fn CGSManagedDisplayGetCurrentSpace(cid: ConnectionId, display: CFStringRef) -> SpaceId;
   pub fn CGSCopyManagedDisplaySpaces(cid: ConnectionId) -> CFArrayRef;
   pub fn CGSCopySpacesForWindows(cid: ConnectionId, mask: i32, windows: CFArrayRef) -> CFArrayRef;
+  pub fn CGSGetWindowTags(cid: ConnectionId, window: u32, tags: *mut u32, bits: i32) -> CgError;
   pub fn CGSRegisterNotifyProc(proc_: NotifyProc, event: u32, user: *mut c_void) -> CgError;
 
   // Public CoreGraphics.

@@ -120,7 +120,8 @@ pub struct WindowInfo {
 
 /// Normal windows on a single Space, front-most first. Windows on every Space
 /// (sticky palettes, other overlays) say nothing about what a particular
-/// desktop is for, and minimized or background-tab windows are on none.
+/// desktop is for, background-tab windows are on none, and minimized windows
+/// are left out.
 pub(crate) fn windows(cid: ConnectionId, exclude_pid: i32) -> Vec<WindowInfo> {
   let k = keys();
   let mut out: Vec<WindowInfo> = unsafe {
@@ -164,6 +165,9 @@ pub(crate) fn windows(cid: ConnectionId, exclude_pid: i32) -> Vec<WindowInfo> {
       })
       .collect()
   };
+  // Minimized windows still report their Space; they are not "on" it for
+  // our purposes, so they count as absent.
+  out.retain(|window| !is_minimized(cid, window.id));
   out.retain_mut(|window| match spaces_for_window(cid, window.id)[..] {
     [space] => {
       window.space = space;
@@ -172,6 +176,21 @@ pub(crate) fn windows(cid: ConnectionId, exclude_pid: i32) -> Vec<WindowInfo> {
     _ => false,
   });
   out
+}
+
+/// WindowServer tag bit set while a window is minimized to the Dock
+/// (verified: set by minimizing, clear on every normal window, including
+/// windows on other Spaces).
+const MINIMIZED_TAG: u64 = 1 << 60;
+
+pub(crate) fn window_tags(cid: ConnectionId, window_id: u32) -> u64 {
+  let mut tags = [0u32; 2];
+  unsafe { ffi::CGSGetWindowTags(cid, window_id, tags.as_mut_ptr(), 64) };
+  tags[0] as u64 | (tags[1] as u64) << 32
+}
+
+pub(crate) fn is_minimized(cid: ConnectionId, window_id: u32) -> bool {
+  window_tags(cid, window_id) & MINIMIZED_TAG != 0
 }
 
 pub(crate) fn apps_by_space(windows: &[WindowInfo]) -> AppsBySpace {

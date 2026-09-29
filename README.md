@@ -28,6 +28,11 @@ windows, tabs and terminals) uses:
 | local dev sites | `lsof` maps a `localhost:PORT` tab to the listening process and its working directory | none |
 | window screenshots → local VLM | `screencapture -l` (works across Spaces) → Qwen3-VL-2B via Homebrew `llama-server` on 127.0.0.1 | Screen Recording |
 
+Minimized windows count as absent everywhere (apps, chips, titles, naming,
+screenshots): WindowServer still reports them on their Space, so they are
+recognized by their "minimized" window tag. A desktop with no windows left
+shows only a small "Desktop N (empty)".
+
 Each desktop also gets a **projects** list (the repository roots its agents,
 terminals, dev sites and IDE windows point at, most active first), shown under
 the app list, e.g. "artcraft · Claude working · dev site :4201".

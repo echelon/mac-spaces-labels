@@ -124,7 +124,11 @@ impl Model {
     }
   }
 
+  /// The name the overlay shows (menu bar, `context.json`).
   pub fn title_for(&self, space: &spaces_sys::Space) -> String {
+    if self.apps.get(&space.id).is_none_or(|apps| apps.is_empty()) {
+      return model::space_name(space);
+    }
     let context = self.contexts.as_ref().and_then(|all| all.get(&space.id));
     model::titles(space, &self.names, context, &self.settings.project_names).title
   }
