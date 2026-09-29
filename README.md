@@ -57,15 +57,9 @@ your own name and description, which win over the model's; each rename is
 appended to `feedback.jsonl` with the exact model input and the model's
 suggestion, as eval data.
 
-The VLM is optional (menu bar → Describe windows with local AI). Put
-`Qwen3VL-2B-Instruct-Q8_0.gguf` and `mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf`
-(from `Qwen/Qwen3-VL-2B-Instruct-GGUF`) in
-`~/Library/Application Support/io.echelon.spaces-labels/models/`. On an M4
-Pro it takes 1.0–1.6 s per window at 1024 image tokens, near-zero CPU (Metal),
-and ~3.7 GB while loaded. It runs one window at a time with a 3 s cooldown,
-refreshes a window every 60 s (showing desktop) or 5 min (others) unless its
-title changes, pauses under serious thermal pressure or Low Power Mode, and
-stops after 10 idle minutes.
+The local models (which, where to get them, how they run, how to run them by
+hand) are documented in [docs/MODELS.md](docs/MODELS.md); `make models`
+downloads them.
 
 Browser windows are matched to WindowServer windows by bounds, so tabs work
 without Screen Recording. The latest context of every desktop is written to

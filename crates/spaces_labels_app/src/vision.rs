@@ -11,8 +11,10 @@
 //!   every [`REFRESH_SHOWING`]/[`REFRESH_HIDDEN`] unless its title changes;
 //! * paused under serious thermal pressure or Low Power Mode, and when Screen
 //!   Recording (needed for screenshots) is not granted;
-//! * the server runs at low priority, is stopped after [`IDLE_SHUTDOWN`] to
-//!   free its ~3 GB, and a watchdog kills it if this app dies.
+//! * the servers run at low priority and are stopped when idle (vision after
+//!   [`IDLE_SHUTDOWN`], naming after [`TEXT_IDLE_SHUTDOWN`]) to free their
+//!   ~3 GB each; a watchdog kills them if this app dies, and leftovers from
+//!   an earlier run are reaped at startup.
 //!
 //! Screenshots come from `screencapture -l <window>` (works for windows on
 //! other Spaces) downscaled by `sips`, then are deleted.
@@ -70,6 +72,7 @@ const COOLDOWN: Duration = Duration::from_secs(3);
 const REFRESH_SHOWING: Duration = Duration::from_secs(60);
 const REFRESH_HIDDEN: Duration = Duration::from_secs(300);
 const IDLE_SHUTDOWN: Duration = Duration::from_secs(600);
+const TEXT_IDLE_SHUTDOWN: Duration = Duration::from_secs(120);
 /// Windows smaller than this (points) are palettes and popups.
 const MIN_SIDE: f64 = 200.0;
 
@@ -114,7 +117,11 @@ pub fn start(app: &AppHandle) {
 }
 
 struct Server {
+  /// llama-server itself, so stopping it cannot miss (see `Drop`).
   child: Child,
+  /// Stops llama-server if this app dies without dropping `Server`.
+  watchdog: Option<Child>,
+  idle_shutdown: Duration,
   port: u16,
   model: &'static str,
   last_used: Instant,
@@ -122,9 +129,41 @@ struct Server {
 
 impl Drop for Server {
   fn drop(&mut self) {
-    // Killing the watchdog shell runs its trap, which kills llama-server.
+    // Kill the server process directly. (An earlier version killed a shell
+    // wrapper whose cleanup trap never ran under SIGKILL, leaking a 3 GB
+    // llama-server on every idle shutdown.)
     let _ = self.child.kill();
     let _ = self.child.wait();
+    // The watchdog notices within 2 s and exits; reap it off this thread.
+    if let Some(mut watchdog) = self.watchdog.take() {
+      std::thread::spawn(move || watchdog.wait());
+    }
+  }
+}
+
+/// Kills llama-servers this app started that outlived it (parent gone), in
+/// case a crash ever beat the watchdog. Only processes serving our models
+/// folder are touched.
+fn reap_orphans(models: &Path) {
+  let Ok(output) = Command::new("/bin/ps")
+    .args(["-axo", "pid=,ppid=,command="])
+    .output()
+  else {
+    return;
+  };
+  let folder = models.display().to_string();
+  for line in String::from_utf8_lossy(&output.stdout).lines() {
+    let mut parts = line.split_whitespace();
+    let (Some(pid), Some(ppid)) = (parts.next(), parts.next()) else {
+      continue;
+    };
+    let command: String = parts.collect::<Vec<_>>().join(" ");
+    if ppid == "1" && command.contains("llama-server") && command.contains(&folder) {
+      if debug_enabled() {
+        eprintln!("[vision] killing orphaned model server {pid}");
+      }
+      let _ = Command::new("/bin/kill").args(["-9", pid]).status();
+    }
   }
 }
 
@@ -133,6 +172,7 @@ fn run(app: AppHandle) {
   let (Some(models), Ok(config)) = (models_dir(&app), app.path().app_config_dir()) else {
     return;
   };
+  reap_orphans(&models);
   let scratch = std::env::temp_dir().join(format!("spaces-labels-{}", std::process::id()));
   let _ = std::fs::create_dir_all(&scratch);
   let mut vision_server: Option<Server> = None;
@@ -149,7 +189,7 @@ fn run(app: AppHandle) {
     for server in [&mut vision_server, &mut text_server] {
       if server
         .as_ref()
-        .is_some_and(|s| s.last_used.elapsed() > IDLE_SHUTDOWN)
+        .is_some_and(|s| s.last_used.elapsed() > s.idle_shutdown)
       {
         *server = None;
       }
@@ -368,33 +408,66 @@ fn start_server(
     .and_then(|l| l.local_addr())
     .map_err(|e| e.to_string())?
     .port();
-  let quote = |p: &Path| format!("'{}'", p.display().to_string().replace('\'', r"'\''"));
-  // The shell is a watchdog: it stops llama-server when this app exits (even
-  // if it crashes) or when the shell itself is killed.
-  let script = format!(
-    "{binary} -m {model} {vision} --host 127.0.0.1 --port {port} \
-     --ctx-size 4096 --parallel 1 --threads 4 --prio -1 --no-webui \
-     --reasoning off >/dev/null 2>&1 & S=$!; \
-     trap 'kill $S 2>/dev/null' EXIT TERM; \
-     while kill -0 {parent} 2>/dev/null && kill -0 $S 2>/dev/null; do sleep 2; done",
-    model = quote(&models.join(weights)),
-    vision = projector
-      .map(|p| format!(
-        "--mmproj {} --image-max-tokens {MAX_IMAGE_TOKENS}",
-        quote(&models.join(p))
-      ))
-      .unwrap_or_default(),
-    parent = std::process::id(),
+  let mut args: Vec<String> = vec!["-m".into(), models.join(weights).display().to_string()];
+  if let Some(projector) = projector {
+    args.extend([
+      "--mmproj".into(),
+      models.join(projector).display().to_string(),
+      "--image-max-tokens".into(),
+      MAX_IMAGE_TOKENS.to_string(),
+    ]);
+  }
+  args.extend(
+    [
+      "--host",
+      "127.0.0.1",
+      "--ctx-size",
+      "4096",
+      "--parallel",
+      "1",
+      "--threads",
+      "4",
+      "--prio",
+      "-1",
+      "--no-webui",
+      "--reasoning",
+      "off",
+      "--port",
+    ]
+    .map(String::from),
   );
-  let child = Command::new("/bin/sh")
-    .args(["-c", &script])
+  args.push(port.to_string());
+  let child = Command::new(binary)
+    .args(&args)
     .stdin(Stdio::null())
     .stdout(Stdio::null())
     .stderr(Stdio::null())
     .spawn()
     .map_err(|e| e.to_string())?;
+  // Watchdog: stops the server if this app exits (even by crashing), and
+  // exits by itself once the server is gone.
+  let watchdog = Command::new("/bin/sh")
+    .arg("-c")
+    .arg(format!(
+      "while kill -0 {parent} 2>/dev/null && kill -0 {server} 2>/dev/null; do sleep 2; done; kill -9 {server} 2>/dev/null",
+      parent = std::process::id(),
+      server = child.id(),
+    ))
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .ok();
   let server = Server {
     child,
+    watchdog,
+    // Screenshots keep the vision model busy; names are rare, so the text
+    // model gives its memory back quickly.
+    idle_shutdown: if projector.is_some() {
+      IDLE_SHUTDOWN
+    } else {
+      TEXT_IDLE_SHUTDOWN
+    },
     port,
     model: weights,
     last_used: Instant::now(),
